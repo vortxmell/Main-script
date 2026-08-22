@@ -9951,6 +9951,46 @@ do -- === AUTO FARM (scoped) ===
     -- terus): GetChildren() order tak dijamin stable across
     -- server/rejoin, tapi Position fizikal setiap feeder KEKAL sama —
     -- jadi sort ni bagi urutan round-robin yg consistent setiap scan.
+    -- FIX (confirmed via debug dump): "FEEDER Lv.X" nameplate label
+    -- bukan dalam SurfaceGui yg sama dgn button "UPGRADE FEEDER" — ia
+    -- Part BERASINGAN sepenuhnya (Y berbeza, ~3.5 stud jauh dlm XZ).
+    -- Setiap nameplate plak jaraknya konsisten ~10+ stud dari button
+    -- feeder LAIN, jadi nearest-neighbour (XZ only, abaikan Y) cukup
+    -- utk pairing yg betul & unik.
+    local function findAllFeederNameplates()
+        local CoopUI = workspace:FindFirstChild("Coops") and workspace.Coops:FindFirstChild("CoopUI")
+        if not CoopUI then return {} end
+        local list = {}
+        for _, child in ipairs(CoopUI:GetChildren()) do
+            if child:IsA("BasePart") then
+                local surfaceGui = child:FindFirstChildOfClass("SurfaceGui")
+                if surfaceGui then
+                    local nameLbl = findLabelTextInGui(surfaceGui, "name")
+                    if nameLbl and nameLbl.Text:match("^FEEDER") then
+                        local level = tonumber(nameLbl.Text:match("Lv%.(%d+)"))
+                        if level then
+                            table.insert(list, {pos = child.Position, level = level})
+                        end
+                    end
+                end
+            end
+        end
+        return list
+    end
+
+    local function nearestFeederLevel(pos, nameplates)
+        local bestLevel, bestDistSq = nil, nil
+        for _, np in ipairs(nameplates) do
+            local dx, dz = pos.X - np.pos.X, pos.Z - np.pos.Z
+            local distSq = dx * dx + dz * dz -- XZ je, Y diabaikan (beza tinggi Part)
+            if not bestDistSq or distSq < bestDistSq then
+                bestDistSq = distSq
+                bestLevel = np.level
+            end
+        end
+        return bestLevel
+    end
+
     local function findAllFeederPartsByLabel(labelText)
         local CoopUI = workspace:FindFirstChild("Coops") and workspace.Coops:FindFirstChild("CoopUI")
         if not CoopUI then return {} end
@@ -9963,11 +10003,7 @@ do -- === AUTO FARM (scoped) ===
                     local lbl = findLabelTextInGui(surfaceGui, "label")
                     if lbl and lbl.Text == labelText then
                         local belowLbl = findLabelTextInGui(surfaceGui, "below")
-                        -- Level tersimpan pada label berasingan (Name = "name"),
-                        -- Text cth "FEEDER Lv.15" — parse nombor selepas "Lv.".
-                        local nameLbl = findLabelTextInGui(surfaceGui, "name")
-                        local level = nameLbl and tonumber(nameLbl.Text:match("Lv%.(%d+)"))
-                        table.insert(list, {part = child, prompt = prompt, belowLbl = belowLbl, pos = child.Position, level = level})
+                        table.insert(list, {part = child, prompt = prompt, belowLbl = belowLbl, pos = child.Position})
                     end
                 end
             end
@@ -9976,6 +10012,13 @@ do -- === AUTO FARM (scoped) ===
             if a.pos.X ~= b.pos.X then return a.pos.X < b.pos.X end
             return a.pos.Z < b.pos.Z
         end)
+        -- Isi level guna nearest-neighbour nameplate matching (lihat atas)
+        if labelText == "UPGRADE FEEDER" and #list > 0 then
+            local nameplates = findAllFeederNameplates()
+            for _, entry in ipairs(list) do
+                entry.level = nearestFeederLevel(entry.pos, nameplates)
+            end
+        end
         return list
     end
 
