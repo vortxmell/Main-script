@@ -604,16 +604,15 @@ V.PLAYER_DROP_OPEN_H = 184  -- Player: noclip + invisible + reset/respawn row + 
 V.MISC_DROP_OPEN_H   = 122  -- Misc: freeze player + follow player (Wall Tools & Route Builder row dipindah keluar)
 V.TOOLS_DROP_OPEN_H  = 80   -- Tools: Wall Tools row + Platform Tools row
 -- Auto Farm tab constants (used in updateScrollState)
--- Farming dropdown rows: Auto Collect Scrap(30) + Auto Rebirth(56) +
--- Auto Tower status(78)/toggle(98) + Anti AFK(122) -> open height 150.
+-- Farming dropdown: Auto Collect Scrap, Auto Rebirth, Auto Tower, Anti AFK.
+-- (Auto Upgrade Coop/Feeder dipindah ke dropdown Upgrades berasingan.)
 V.AF_DROP_CLOSED_H = 24
-V.AF_DROP_OPEN_H   = 150
+V.AF_DROP_OPEN_H   = 156
 V.afDropOpen = false
--- Upgrades dropdown (Auto Upgrade Coop + Auto Upgrade Feeder) — placed
--- below Farming dropdown dalam Auto Farm tab.
-V.UPG_DROP_CLOSED_H = 24
-V.UPG_DROP_OPEN_H   = 82
-V.upgDropOpen = false
+-- Upgrades dropdown: Auto Upgrade Coop + Auto Upgrade Feeder.
+V.UP_DROP_CLOSED_H = 24
+V.UP_DROP_OPEN_H   = 84
+V.upDropOpen = false
 -- Auto Farm UI handles (forward declare; assigned inside AUTO FARM block)
 -- ========================
 -- STATE TABLES
@@ -659,10 +658,10 @@ function updateScrollState()
         V.Tab2RightContent.CanvasSize = UDim2.new(0, 0, 0, totalR)
         V.Tab2RightContent.ScrollBarThickness = (totalR > visH) and 4 or 0
     elseif V.Tab3AFContent and V.Tab3AFContent.Visible then
-        -- Auto Farm: Farming dropdown + Upgrades dropdown (stacked)
-        local afH  = V.afDropOpen  and V.AF_DROP_OPEN_H  or V.AF_DROP_CLOSED_H
-        local upgH = V.upgDropOpen and V.UPG_DROP_OPEN_H or V.UPG_DROP_CLOSED_H
-        local totalH = 5 + afH + V.DROP_GAP + upgH + 5
+        -- Auto Farm: Farming + Upgrades wrapper (Win Farm/Shop dah dibuang, game baru)
+        local afH = V.afDropOpen and V.AF_DROP_OPEN_H or V.AF_DROP_CLOSED_H
+        local upH = V.upDropOpen and V.UP_DROP_OPEN_H or V.UP_DROP_CLOSED_H
+        local totalH = 5 + afH + V.DROP_GAP + upH + 5
         V.ContentPanelLeft.CanvasSize = UDim2.new(0, 0, 0, totalH)
         V.ContentPanelLeft.ScrollBarThickness = (totalH > visH) and 4 or 0
     end
@@ -8281,6 +8280,9 @@ for i, seg in ipairs(rbSegments) do
                     rbStatCycle = rbStatCycle + 1
                     rbStatDied  = rbStatDied + 1
                     rbUpdateStatLabels()
+                    print(string.format(
+                        "[RB DEBUG] DIED | cycle=%d win=%d aborted=%d died=%d",
+                        rbStatCycle, rbStatWin, rbStatAborted, rbStatDied))
                     -- Loop NI TAK stop — retry cycle yg sama, ulang wait
                     -- pattern yg SAMA (tak flip ke pattern lain), then cuba
                     -- route ni balik dari awal. (usePattern1 sengaja tak diubah)
@@ -8325,6 +8327,10 @@ for i, seg in ipairs(rbSegments) do
                         end
                     end
                     rbUpdateStatLabels()
+                    print(string.format(
+                        "[RB DEBUG] %s | cycle=%d win=%d aborted=%d died=%d",
+                        rbWinpoint and "WIN" or "ABORTED",
+                        rbStatCycle, rbStatWin, rbStatAborted, rbStatDied))
 
                     usePattern1 = not usePattern1
                 end
@@ -9743,7 +9749,6 @@ do -- === AUTO FARM (scoped) ===
         end
     end
 
-
     -- ═══ Auto Tower ═══════════════════════════════════════════════
     -- Flow (dah test standalone sebelum ni — coop_scan.lua,
     -- get_my_coop.lua, get_my_chicken_level.lua, test_skip_v2.lua):
@@ -9843,10 +9848,10 @@ do -- === AUTO FARM (scoped) ===
         return false
     end
 
-    -- ── Auto Tower status row (y=78) ───────────────────────────────
+    -- ── Auto Tower status row (y=100) ──────────────────────────────
     local atStatusRow = Instance.new("Frame")
     atStatusRow.Size = UDim2.new(1, -8, 0, 16)
-    atStatusRow.Position = UDim2.new(0, 4, 0, 78)
+    atStatusRow.Position = UDim2.new(0, 4, 0, 82)
     atStatusRow.BackgroundTransparency = 1
     atStatusRow.Parent = V.afWrapper
 
@@ -9878,7 +9883,7 @@ do -- === AUTO FARM (scoped) ===
         end
     end)
 
-    -- ── Auto Tower toggle (y=98) ────────────────────────────────────
+    -- ── Auto Tower toggle (y=120) ──────────────────────────────────
     V.autoTowerEnabled_af = false
     local autoTowerLoopRunning = false
     -- FIX: bukan "tier" yg kena naik berterusan — Auto Rebirth RESET level
@@ -9916,7 +9921,7 @@ do -- === AUTO FARM (scoped) ===
 
     local atRow = Instance.new("Frame")
     atRow.Size = UDim2.new(1, -8, 0, 22)
-    atRow.Position = UDim2.new(0, 4, 0, 98)
+    atRow.Position = UDim2.new(0, 4, 0, 102)
     atRow.BackgroundTransparency = 1
     atRow.BorderSizePixel = 0
     atRow.Parent = V.afWrapper
@@ -10002,17 +10007,17 @@ do -- === AUTO FARM (scoped) ===
         end
     end
 
-    -- ═══ Anti AFK — simple random-walk nudge (y=122) ═════════════════
-    -- Walk method sama macam Auto Collect Scrap (hum:MoveTo(), terbukti
-    -- berfungsi) — cuma target dia random arah, jarak 3 stud dari posisi
-    -- semasa, bukan cari scrap/recycler. Ulang setiap 30 saat selagi ON.
+    -- ═══ Anti AFK ═════════════════════════════════════════════════
+    -- Simple: random walk 3 studs dari posisi semasa, setiap interval
+    -- tertentu — guna Humanoid:MoveTo() SAMA pattern macam Auto Collect
+    -- Scrap punya walk method (acsWalkTo).
+    local ANTI_AFK_INTERVAL = 60 -- saat antara setiap random walk
+    local ANTI_AFK_DIST     = 3  -- studs
+
     V.antiAfkEnabled_af = false
     local antiAfkLoopRunning = false
-    local ANTIAFK_WALK_DIST    = 3
-    local ANTIAFK_WALK_TIMEOUT = 5   -- saat; safety kalau MoveToFinished tak fire
-    local ANTIAFK_INTERVAL     = 30  -- saat antara setiap nudge
 
-    local function antiAfkGetChar()
+    local function afkGetChar()
         local char = V.LocalPlayer.Character
         if not char then return nil, nil, nil end
         local hum  = char:FindFirstChildOfClass("Humanoid")
@@ -10021,9 +10026,10 @@ do -- === AUTO FARM (scoped) ===
         return char, hum, root
     end
 
-    -- Walk guna MoveTo — respect toggle (stop serta-merta bila di-off).
-    local function antiAfkWalkTo(hum, root, targetPos, timeout)
-        timeout = timeout or ANTIAFK_WALK_TIMEOUT
+    -- Walk guna MoveTo — sama pattern Auto Collect Scrap (acsWalkTo),
+    -- respect toggle (stop serta-merta bila di-off).
+    local function afkWalkTo(hum, root, targetPos, timeout)
+        timeout = timeout or 5
         hum:MoveTo(targetPos)
         local reached = false
         local conn
@@ -10040,15 +10046,14 @@ do -- === AUTO FARM (scoped) ===
         antiAfkLoopRunning = true
         task.spawn(function()
             while V.antiAfkEnabled_af do
-                local _, hum, root = antiAfkGetChar()
-                if hum and root then
-                    local angle = math.random() * math.pi * 2
-                    local dir = Vector3.new(math.cos(angle), 0, math.sin(angle))
-                    local targetPos = root.Position + dir * ANTIAFK_WALK_DIST
-                    antiAfkWalkTo(hum, root, targetPos, ANTIAFK_WALK_TIMEOUT)
+                local char, hum, root = afkGetChar()
+                if root then
+                    local angle  = math.random() * math.pi * 2
+                    local offset = Vector3.new(math.cos(angle) * ANTI_AFK_DIST, 0, math.sin(angle) * ANTI_AFK_DIST)
+                    afkWalkTo(hum, root, root.Position + offset, 5)
                 end
                 local t0 = tick()
-                while V.antiAfkEnabled_af and (tick() - t0) < ANTIAFK_INTERVAL do
+                while V.antiAfkEnabled_af and (tick() - t0) < ANTI_AFK_INTERVAL do
                     task.wait(0.5)
                 end
             end
@@ -10056,74 +10061,74 @@ do -- === AUTO FARM (scoped) ===
         end)
     end
 
-    local aaRow = Instance.new("Frame")
-    aaRow.Size = UDim2.new(1, -8, 0, 22)
-    aaRow.Position = UDim2.new(0, 4, 0, 122)
-    aaRow.BackgroundTransparency = 1
-    aaRow.BorderSizePixel = 0
-    aaRow.Parent = V.afWrapper
+    local afkRow = Instance.new("Frame")
+    afkRow.Size = UDim2.new(1, -8, 0, 22)
+    afkRow.Position = UDim2.new(0, 4, 0, 128)
+    afkRow.BackgroundTransparency = 1
+    afkRow.BorderSizePixel = 0
+    afkRow.Parent = V.afWrapper
 
-    local aaLbl = Instance.new("TextLabel")
-    aaLbl.Size = UDim2.new(0.55, 0, 1, 0)
-    aaLbl.BackgroundTransparency = 1
-    aaLbl.Text = "Anti AFK"
-    aaLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
-    aaLbl.TextSize = 10
-    aaLbl.Font = Enum.Font.Gotham
-    aaLbl.TextXAlignment = Enum.TextXAlignment.Left
-    aaLbl.Parent = aaRow
+    local afkLbl = Instance.new("TextLabel")
+    afkLbl.Size = UDim2.new(0.55, 0, 1, 0)
+    afkLbl.BackgroundTransparency = 1
+    afkLbl.Text = "Anti AFK"
+    afkLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    afkLbl.TextSize = 10
+    afkLbl.Font = Enum.Font.Gotham
+    afkLbl.TextXAlignment = Enum.TextXAlignment.Left
+    afkLbl.Parent = afkRow
 
-    local aaStateText = Instance.new("TextLabel")
-    aaStateText.Size = UDim2.new(0.18, 0, 1, 0)
-    aaStateText.Position = UDim2.new(0.55, 0, 0, 0)
-    aaStateText.BackgroundTransparency = 1
-    aaStateText.Text = "OFF"
-    aaStateText.TextColor3 = Color3.fromRGB(160, 160, 160)
-    aaStateText.TextSize = 10
-    aaStateText.Font = Enum.Font.GothamBold
-    aaStateText.TextXAlignment = Enum.TextXAlignment.Right
-    aaStateText.Parent = aaRow
+    local afkStateText = Instance.new("TextLabel")
+    afkStateText.Size = UDim2.new(0.18, 0, 1, 0)
+    afkStateText.Position = UDim2.new(0.55, 0, 0, 0)
+    afkStateText.BackgroundTransparency = 1
+    afkStateText.Text = "OFF"
+    afkStateText.TextColor3 = Color3.fromRGB(160, 160, 160)
+    afkStateText.TextSize = 10
+    afkStateText.Font = Enum.Font.GothamBold
+    afkStateText.TextXAlignment = Enum.TextXAlignment.Right
+    afkStateText.Parent = afkRow
 
-    local aaPillTrack = Instance.new("Frame")
-    aaPillTrack.Size = UDim2.new(0, 34, 0, 16)
-    aaPillTrack.Position = UDim2.new(1, -34, 0.5, -8)
-    aaPillTrack.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    aaPillTrack.BorderSizePixel = 0
-    aaPillTrack.Parent = aaRow
-    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = aaPillTrack end
+    local afkPillTrack = Instance.new("Frame")
+    afkPillTrack.Size = UDim2.new(0, 34, 0, 16)
+    afkPillTrack.Position = UDim2.new(1, -34, 0.5, -8)
+    afkPillTrack.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    afkPillTrack.BorderSizePixel = 0
+    afkPillTrack.Parent = afkRow
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = afkPillTrack end
 
-    local aaKnob = Instance.new("Frame")
-    aaKnob.Size = UDim2.new(0, 12, 0, 12)
-    aaKnob.Position = UDim2.new(0, 2, 0.5, -6)
-    aaKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-    aaKnob.BorderSizePixel = 0
-    aaKnob.Parent = aaPillTrack
-    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = aaKnob end
+    local afkKnob = Instance.new("Frame")
+    afkKnob.Size = UDim2.new(0, 12, 0, 12)
+    afkKnob.Position = UDim2.new(0, 2, 0.5, -6)
+    afkKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    afkKnob.BorderSizePixel = 0
+    afkKnob.Parent = afkPillTrack
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = afkKnob end
 
-    local aaToggleHitbox = Instance.new("TextButton")
-    aaToggleHitbox.Size = UDim2.new(0, 34, 0, 16)
-    aaToggleHitbox.Position = UDim2.new(1, -34, 0.5, -8)
-    aaToggleHitbox.BackgroundTransparency = 1
-    aaToggleHitbox.Text = ""
-    aaToggleHitbox.Parent = aaRow
+    local afkToggleHitbox = Instance.new("TextButton")
+    afkToggleHitbox.Size = UDim2.new(0, 34, 0, 16)
+    afkToggleHitbox.Position = UDim2.new(1, -34, 0.5, -8)
+    afkToggleHitbox.BackgroundTransparency = 1
+    afkToggleHitbox.Text = ""
+    afkToggleHitbox.Parent = afkRow
 
-    local aaPillTween = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
+    local afkPillTween = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
 
-    local function updateAaPill(on)
+    local function updateAfkPill(on)
         if on then
-            V.TweenService:Create(aaPillTrack, aaPillTween, {BackgroundColor3 = Color3.fromRGB(255,255,255)}):Play()
-            V.TweenService:Create(aaKnob, aaPillTween, {Position = UDim2.new(0,20,0.5,-6), BackgroundColor3 = Color3.fromRGB(0,0,0)}):Play()
-            aaStateText.Text = "ON";  aaStateText.TextColor3 = Color3.fromRGB(255,255,255)
+            V.TweenService:Create(afkPillTrack, afkPillTween, {BackgroundColor3 = Color3.fromRGB(255,255,255)}):Play()
+            V.TweenService:Create(afkKnob, afkPillTween, {Position = UDim2.new(0,20,0.5,-6), BackgroundColor3 = Color3.fromRGB(0,0,0)}):Play()
+            afkStateText.Text = "ON";  afkStateText.TextColor3 = Color3.fromRGB(255,255,255)
         else
-            V.TweenService:Create(aaPillTrack, aaPillTween, {BackgroundColor3 = Color3.fromRGB(60,60,60)}):Play()
-            V.TweenService:Create(aaKnob, aaPillTween, {Position = UDim2.new(0,2,0.5,-6), BackgroundColor3 = Color3.fromRGB(200,200,200)}):Play()
-            aaStateText.Text = "OFF"; aaStateText.TextColor3 = Color3.fromRGB(160,160,160)
+            V.TweenService:Create(afkPillTrack, afkPillTween, {BackgroundColor3 = Color3.fromRGB(60,60,60)}):Play()
+            V.TweenService:Create(afkKnob, afkPillTween, {Position = UDim2.new(0,2,0.5,-6), BackgroundColor3 = Color3.fromRGB(200,200,200)}):Play()
+            afkStateText.Text = "OFF"; afkStateText.TextColor3 = Color3.fromRGB(160,160,160)
         end
     end
 
-    aaToggleHitbox.MouseButton1Click:Connect(function()
+    afkToggleHitbox.MouseButton1Click:Connect(function()
         V.antiAfkEnabled_af = not V.antiAfkEnabled_af
-        updateAaPill(V.antiAfkEnabled_af)
+        updateAfkPill(V.antiAfkEnabled_af)
         if V.antiAfkEnabled_af then
             antiAfkRunLoop()
         end
@@ -10137,7 +10142,7 @@ do -- === AUTO FARM (scoped) ===
         local wantOn = (t.en == true)
         if V.antiAfkEnabled_af ~= wantOn then
             V.antiAfkEnabled_af = wantOn
-            updateAaPill(V.antiAfkEnabled_af)
+            updateAfkPill(V.antiAfkEnabled_af)
             if V.antiAfkEnabled_af then
                 antiAfkRunLoop()
             end
@@ -10146,17 +10151,26 @@ do -- === AUTO FARM (scoped) ===
 
     local function recalcTab3AFPositions()
         local tweenI = TweenInfo.new(0.2, Enum.EasingStyle.Quart)
-        local afH  = V.afDropOpen  and V.AF_DROP_OPEN_H  or V.AF_DROP_CLOSED_H
-        local upgH = V.upgDropOpen and V.UPG_DROP_OPEN_H or V.UPG_DROP_CLOSED_H
+        local currentY = 5
+
+        local afH = V.afDropOpen and V.AF_DROP_OPEN_H or V.AF_DROP_CLOSED_H
         V.TweenService:Create(V.afWrapper, tweenI, {
-            Position = UDim2.new(0, 5, 0, 5), Size = UDim2.new(1, -10, 0, afH)
+            Position = UDim2.new(0, 5, 0, currentY), Size = UDim2.new(1, -10, 0, afH)
         }):Play()
-        if V.upgWrapper then
-            V.TweenService:Create(V.upgWrapper, tweenI, {
-                Position = UDim2.new(0, 5, 0, 5 + afH + V.DROP_GAP),
-                Size = UDim2.new(1, -10, 0, upgH)
+        currentY = currentY + afH + V.DROP_GAP
+
+        -- V.upWrapper dibina dalam dropdown Upgrades (do-block berasingan,
+        -- lepas Farming) — belum wujud masa fungsi ni DIDEFINISIKAN, tapi
+        -- sentiasa wujud masa fungsi ni DIPANGGIL (lepas seluruh script
+        -- habis load), sebab V.upWrapper diakses via table V (upvalue),
+        -- bukan local. Guard `if` ni just extra safety.
+        if V.upWrapper then
+            local upH = V.upDropOpen and V.UP_DROP_OPEN_H or V.UP_DROP_CLOSED_H
+            V.TweenService:Create(V.upWrapper, tweenI, {
+                Position = UDim2.new(0, 5, 0, currentY), Size = UDim2.new(1, -10, 0, upH)
             }):Play()
         end
+
         updateScrollState()
     end
     V.recalcTab3AFPositions_af = recalcTab3AFPositions
@@ -10168,39 +10182,40 @@ do -- === AUTO FARM (scoped) ===
     end)
 
     end -- end Farming dropdown
-    do -- === Upgrades dropdown (scoped) ===
-    V.upgWrapper = Instance.new("Frame")
-    V.upgWrapper.Name = "UpgradesDrop"
-    V.upgWrapper.Size = UDim2.new(1, -10, 0, V.UPG_DROP_CLOSED_H)
-    V.upgWrapper.Position = UDim2.new(0, 5, 0, 5 + V.AF_DROP_CLOSED_H + V.DROP_GAP)
-    V.upgWrapper.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-    V.upgWrapper.BorderSizePixel = 0
-    V.upgWrapper.ClipsDescendants = true
-    V.upgWrapper.Parent = V.Tab3AFContent
-    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0,4); c.Parent = V.upgWrapper end
 
-    V.upgHeader = Instance.new("TextButton")
-    V.upgHeader.Size = UDim2.new(1, 0, 0, 24)
-    V.upgHeader.BackgroundTransparency = 1
-    V.upgHeader.BorderSizePixel = 0
-    V.upgHeader.Text = "Upgrades"
-    V.upgHeader.TextColor3 = Color3.fromRGB(255, 255, 255)
-    V.upgHeader.TextSize = 10
-    V.upgHeader.Font = Enum.Font.GothamBold
-    V.upgHeader.TextXAlignment = Enum.TextXAlignment.Left
-    V.upgHeader.Parent = V.upgWrapper
-    do local p = Instance.new("UIPadding"); p.PaddingLeft = UDim.new(0,8); p.Parent = V.upgHeader end
+    do -- === Upgrades dropdown (scoped) — Auto Upgrade Coop + Feeder ===
+    V.upWrapper = Instance.new("Frame")
+    V.upWrapper.Name = "UpgradesDrop"
+    V.upWrapper.Size = UDim2.new(1, -10, 0, V.UP_DROP_CLOSED_H)
+    V.upWrapper.Position = UDim2.new(0, 5, 0, 34) -- 5 + AF_DROP_CLOSED_H(24) + DROP_GAP(5), sebelum recalc jalan
+    V.upWrapper.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    V.upWrapper.BorderSizePixel = 0
+    V.upWrapper.ClipsDescendants = true
+    V.upWrapper.Parent = V.Tab3AFContent
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0,4); c.Parent = V.upWrapper end
 
-    V.upgArrow = Instance.new("TextLabel")
-    V.upgArrow.Size = UDim2.new(1, -8, 0, 24)
-    V.upgArrow.BackgroundTransparency = 1
-    V.upgArrow.Text = "▶"
-    V.upgArrow.TextColor3 = Color3.fromRGB(255, 255, 255)
-    V.upgArrow.TextSize = 10
-    V.upgArrow.Font = Enum.Font.GothamBold
-    V.upgArrow.TextXAlignment = Enum.TextXAlignment.Right
-    V.upgArrow.ZIndex = 2
-    V.upgArrow.Parent = V.upgWrapper
+    V.upHeader = Instance.new("TextButton")
+    V.upHeader.Size = UDim2.new(1, 0, 0, 24)
+    V.upHeader.BackgroundTransparency = 1
+    V.upHeader.BorderSizePixel = 0
+    V.upHeader.Text = "Upgrades"
+    V.upHeader.TextColor3 = Color3.fromRGB(255, 255, 255)
+    V.upHeader.TextSize = 10
+    V.upHeader.Font = Enum.Font.GothamBold
+    V.upHeader.TextXAlignment = Enum.TextXAlignment.Left
+    V.upHeader.Parent = V.upWrapper
+    do local p = Instance.new("UIPadding"); p.PaddingLeft = UDim.new(0,8); p.Parent = V.upHeader end
+
+    V.upArrow = Instance.new("TextLabel")
+    V.upArrow.Size = UDim2.new(1, -8, 0, 24)
+    V.upArrow.BackgroundTransparency = 1
+    V.upArrow.Text = "▶"
+    V.upArrow.TextColor3 = Color3.fromRGB(255, 255, 255)
+    V.upArrow.TextSize = 10
+    V.upArrow.Font = Enum.Font.GothamBold
+    V.upArrow.TextXAlignment = Enum.TextXAlignment.Right
+    V.upArrow.ZIndex = 2
+    V.upArrow.Parent = V.upWrapper
 
     do
         local div = Instance.new("Frame")
@@ -10209,10 +10224,10 @@ do -- === AUTO FARM (scoped) ===
         div.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         div.BackgroundTransparency = 0.8
         div.BorderSizePixel = 0
-        div.Parent = V.upgWrapper
+        div.Parent = V.upWrapper
     end
 
-    -- ═══ Auto Upgrade Coop (y=30) ════════════════════════════════════
+    -- ═══ Auto Upgrade Coop (dipindah ke dropdown Upgrades, y=30) ═══════
     -- Identify Part upgrade coop SECARA STABLE (bukan index — order
     -- GetChildren() boleh berubah lain server/rejoin). Setiap Part bawah
     -- CoopUI yg ada ProximityPrompt confirmed ada struktur:
@@ -10301,6 +10316,9 @@ do -- === AUTO FARM (scoped) ===
                         fireproximityprompt(prompt)
                     end
                 end)
+                if not ok then
+                    print("[AutoUpgradeCoop][ERROR] " .. tostring(err))
+                end
                 task.wait(1) -- check tiap 1 saat — live, ikut cost naik tiap upgrade
             end
             autoUpgradeCoopLoopRunning = false
@@ -10312,7 +10330,7 @@ do -- === AUTO FARM (scoped) ===
     aucRow.Position = UDim2.new(0, 4, 0, 30)
     aucRow.BackgroundTransparency = 1
     aucRow.BorderSizePixel = 0
-    aucRow.Parent = V.afWrapper
+    aucRow.Parent = V.upWrapper
 
     local aucLbl = Instance.new("TextLabel")
     aucLbl.Size = UDim2.new(0.55, 0, 1, 0)
@@ -10395,7 +10413,7 @@ do -- === AUTO FARM (scoped) ===
         end
     end
 
-    -- ═══ Auto Upgrade Feeder — ROUND ROBIN (y=52) ════════════════════
+    -- ═══ Auto Upgrade Feeder — ROUND ROBIN (dipindah ke Upgrades, y=56) ═
     -- Bila Upgrade Coop, jumlah feeder bertambah. Setiap feeder ada
     -- Part sendiri dgn label "UPGRADE FEEDER" (sama struktur macam
     -- "UPGRADE COOP" — SurfaceGui > label/below). Per request Mel:
@@ -10572,6 +10590,7 @@ do -- === AUTO FARM (scoped) ===
                     end
                 end)
                 if not ok then
+                    print("[AutoUpgradeFeeder][ERROR] " .. tostring(err))
                 end
                 task.wait(1)
             end
@@ -10581,10 +10600,10 @@ do -- === AUTO FARM (scoped) ===
 
     local aufRow = Instance.new("Frame")
     aufRow.Size = UDim2.new(1, -8, 0, 22)
-    aufRow.Position = UDim2.new(0, 4, 0, 52)
+    aufRow.Position = UDim2.new(0, 4, 0, 56)
     aufRow.BackgroundTransparency = 1
     aufRow.BorderSizePixel = 0
-    aufRow.Parent = V.afWrapper
+    aufRow.Parent = V.upWrapper
 
     local aufLbl = Instance.new("TextLabel")
     aufLbl.Size = UDim2.new(0.55, 0, 1, 0)
@@ -10667,10 +10686,16 @@ do -- === AUTO FARM (scoped) ===
         end
     end
 
-    V.upgHeader.MouseButton1Click:Connect(function()
-        V.upgDropOpen = not V.upgDropOpen
-        V.upgArrow.Text = V.upgDropOpen and "▼" or "▶"
-        if V.recalcTab3AFPositions_af then V.recalcTab3AFPositions_af() end
+
+    V.upHeader.MouseButton1Click:Connect(function()
+        V.upDropOpen = not V.upDropOpen
+        V.upArrow.Text = V.upDropOpen and "▼" or "▶"
+        -- Guna fungsi recalc SAMA yg dibina dalam Farming dropdown —
+        -- ia handle stacking KEDUA-DUA wrapper (afWrapper + upWrapper)
+        -- ikut cumulative Y, bukan reset posisi upWrapper sendiri.
+        if V.recalcTab3AFPositions_af then
+            V.recalcTab3AFPositions_af()
+        end
     end)
 
     end -- end Upgrades dropdown
