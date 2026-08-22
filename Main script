@@ -1,4 +1,294 @@
-lor3.fromRGB(255, 0, 0)
+-- VortX - +1 Speed Keyboard Escape V1
+-- Theme: Black & White ONLY! no grey text or other colors and no text stroke! any AI please take note this!
+-- And please be alert and beware about roblox local variable limit 200 local! AI please take note this!
+
+-- CHANGES V1 (Integrated):
+--   - INTEGRATE Auto Farm tab (Speed Farm + Win Farm) from +1 Speed Keyboard Escape script
+--   - Tab order: Auto Farm → CheatHub → Save Config(
+--   - Save Config now covers Auto Farm toggles + Win Farm fly speed slider
+--   - ADD duplicate execution guard (_G.UITemplate_Cleanup)
+--   - ADD cleanupAll function: stops all farm threads + destroys GUI on close/re-execute
+
+-- ============================================================
+-- TWEAK TRANSPARENCY DI SINI
+-- ============================================================
+local V = {}  -- shared state/UI-object table (fixes 200-local main-chunk limit)
+
+V.BG_TRANSPARENCY = 0.15
+-- ============================================================
+
+-- ============================================================
+-- DUPLICATE EXECUTION GUARD
+-- Kalau script lama masih running, cleanup dulu sebelum
+-- instance baru start. Guna _G table sebagai shared registry.
+-- ============================================================
+if _G.UITemplate_Cleanup then
+    pcall(_G.UITemplate_Cleanup)
+end
+_G.UITemplate_Cleanup = nil
+
+V.Players          = game:GetService("Players")
+V.RunService       = game:GetService("RunService")
+V.TweenService     = game:GetService("TweenService")
+V.UserInputService = game:GetService("UserInputService")
+V.TeleportService  = game:GetService("TeleportService")
+V.HttpService      = game:GetService("HttpService")
+V.ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+V.LocalPlayer = V.Players.LocalPlayer
+
+-- ========================
+-- LAYOUT CONSTANTS
+-- ========================
+
+V.LEFT_W   = 80
+V.TOP_H    = 22
+V.SEARCH_H = 26
+
+-- ========================
+-- SCREEN GUI
+-- ========================
+
+V.ScreenGui = Instance.new("ScreenGui")
+V.ScreenGui.Name = "UITemplate"
+V.ScreenGui.ResetOnSpawn = false
+V.ScreenGui.DisplayOrder = 2147483647 -- FIX (part 5): max int32 — pastikan UI kekal PALING depan
+                                       -- walaupun lepas mati/respawn (999 tak cukup tinggi
+                                       -- berbanding overlay respawn/death game sendiri)
+V.ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+V.ScreenGui.Parent = V.LocalPlayer:WaitForChild("PlayerGui")
+
+-- Re-assert DisplayOrder lepas setiap respawn — jaga-jaga kalau ada
+-- overlay/ScreenGui LAIN yg spawn lepas character baru dgn DisplayOrder
+-- lagi tinggi (cth round-transition UI game sendiri).
+V.LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.1)
+    pcall(function() V.ScreenGui.DisplayOrder = 2147483647 end)
+end)
+
+-- ========================
+-- MAIN FRAME
+-- ========================
+
+V.MainFrame = Instance.new("Frame")
+V.MainFrame.Name = "MainFrame"
+V.MainFrame.Size = UDim2.new(0, 500, 0, 335)
+V.MainFrame.Position = UDim2.new(0.5, -250, 0.5, -167)
+V.MainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+V.MainFrame.BackgroundTransparency = V.BG_TRANSPARENCY
+V.MainFrame.BorderSizePixel = 0
+V.MainFrame.Active = true
+V.MainFrame.Draggable = false
+V.MainFrame.ClipsDescendants = true
+V.MainFrame.Parent = V.ScreenGui
+
+do
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 8)
+    c.Parent = V.MainFrame
+end
+do
+    local s = Instance.new("UIStroke")
+    s.Color = Color3.fromRGB(255, 255, 255)
+    s.Thickness = 1
+    s.Transparency = 0.7
+    s.Parent = V.MainFrame
+end
+
+V.RGBStroke = Instance.new("UIStroke")
+V.RGBStroke.Thickness = 1
+V.RGBStroke.Transparency = 0
+V.RGBStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+V.RGBStroke.Parent = V.MainFrame
+
+-- ========================
+-- TOPBAR
+-- ========================
+
+V.TopBar = Instance.new("Frame")
+V.TopBar.Name = "TopBar"
+V.TopBar.Size = UDim2.new(1, 0, 0, V.TOP_H)
+V.TopBar.Position = UDim2.new(0, 0, 0, 0)
+V.TopBar.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+V.TopBar.BackgroundTransparency = 0
+V.TopBar.BorderSizePixel = 0
+V.TopBar.Parent = V.MainFrame
+
+do
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 8)
+    c.Parent = V.TopBar
+
+    local fix = Instance.new("Frame")
+    fix.Name = "TopBarFix"
+    fix.Size = UDim2.new(1, 0, 0.5, 0)
+    fix.Position = UDim2.new(0, 0, 0.5, 0)
+    fix.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    fix.BackgroundTransparency = 0
+    fix.BorderSizePixel = 0
+    fix.Parent = V.TopBar
+end
+
+V.TitleLabel = Instance.new("TextLabel")
+V.TitleLabel.Size = UDim2.new(0.7, 0, 1, 0)
+V.TitleLabel.Position = UDim2.new(0.02, 0, 0, 0)
+V.TitleLabel.BackgroundTransparency = 1
+V.TitleLabel.Text = "VӨЯƬX - +1 Speed Keyboard Escape V1"
+V.TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+V.TitleLabel.TextSize = 11
+V.TitleLabel.Font = Enum.Font.GothamBold
+V.TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+V.TitleLabel.Parent = V.TopBar
+
+V.CloseBtn = Instance.new("TextButton")
+V.CloseBtn.Size = UDim2.new(0, 20, 0, 20)
+V.CloseBtn.Position = UDim2.new(1, -22, 0.5, -10)
+V.CloseBtn.BackgroundTransparency = 1
+V.CloseBtn.Text = "x"
+V.CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+V.CloseBtn.TextSize = 11
+V.CloseBtn.Font = Enum.Font.GothamBold
+V.CloseBtn.Parent = V.TopBar
+
+V.CloseBtn.MouseButton1Click:Connect(function()
+    if _G.UITemplate_Cleanup then
+        pcall(_G.UITemplate_Cleanup)
+    end
+end)
+
+V.MinBtn = Instance.new("TextButton")
+V.MinBtn.Size = UDim2.new(0, 20, 0, 20)
+V.MinBtn.Position = UDim2.new(1, -44, 0.5, -10)
+V.MinBtn.BackgroundTransparency = 1
+V.MinBtn.Text = "—"
+V.MinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+V.MinBtn.TextSize = 11
+V.MinBtn.Font = Enum.Font.GothamBold
+V.MinBtn.Parent = V.TopBar
+
+do
+    local d = Instance.new("Frame")
+    d.Name = "TopDivider"
+    d.Size = UDim2.new(1, 0, 0, 1)
+    d.Position = UDim2.new(0, 0, 1, -1)
+    d.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    d.BackgroundTransparency = 0.85
+    d.BorderSizePixel = 0
+    d.Parent = V.TopBar
+end
+
+-- ========================
+-- DRAG FRAME LOGIC
+-- ========================
+
+V.frameDragging = false
+
+local function setupDrag(dragSource)
+    dragSource.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or
+           input.UserInputType == Enum.UserInputType.MouseButton1 then
+            V.frameDragging = true
+            V.frameDragStart = input.Position
+            V.frameStartPos = V.MainFrame.Position
+        end
+    end)
+    dragSource.InputChanged:Connect(function(input)
+        if V.frameDragging and (input.UserInputType == Enum.UserInputType.Touch or
+           input.UserInputType == Enum.UserInputType.MouseMovement) then
+            local delta = input.Position - V.frameDragStart
+            V.MainFrame.Position = UDim2.new(
+                V.frameStartPos.X.Scale,
+                V.frameStartPos.X.Offset + delta.X,
+                V.frameStartPos.Y.Scale,
+                V.frameStartPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+    dragSource.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or
+           input.UserInputType == Enum.UserInputType.MouseButton1 then
+            V.frameDragging = false
+        end
+    end)
+end
+
+-- ========================
+-- RESIZE HANDLES
+-- ========================
+
+V.MIN_W, V.MIN_H = 250, 180
+V.resizing = false
+V.resizeCorner = nil
+V.resizeStart = nil
+V.resizeStartSize = nil
+V.resizeStartPos = nil
+
+V.CORNERS = {
+    { name = "TL", ax = 0, ay = 0 },
+    { name = "BL", ax = 0, ay = 1 },
+    { name = "BR", ax = 1, ay = 1 },
+}
+V.HANDLE_SIZE = 28
+
+for _, c in ipairs(V.CORNERS) do
+    local handle = Instance.new("TextButton")
+    handle.Name = "ResizeHandle_" .. c.name
+    handle.Size = UDim2.new(0, V.HANDLE_SIZE, 0, V.HANDLE_SIZE)
+    handle.Position = UDim2.new(
+        c.ax, c.ax == 1 and -V.HANDLE_SIZE or 0,
+        c.ay, c.ay == 1 and -V.HANDLE_SIZE or 0
+    )
+    handle.BackgroundTransparency = 1
+    handle.Text = ""
+    handle.ZIndex = 10
+    handle.Parent = V.MainFrame
+
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.Touch and
+           input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        V.resizing = true
+        V.resizeCorner = c
+        V.resizeStart = input.Position
+        V.resizeStartSize = Vector2.new(V.MainFrame.AbsoluteSize.X, V.MainFrame.AbsoluteSize.Y)
+        V.resizeStartPos = Vector2.new(V.MainFrame.AbsolutePosition.X, V.MainFrame.AbsolutePosition.Y)
+    end)
+end
+
+V.UserInputService.InputChanged:Connect(function(input)
+    if not V.resizing then return end
+    if input.UserInputType ~= Enum.UserInputType.Touch and
+       input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+
+    local delta = input.Position - V.resizeStart
+    local c = V.resizeCorner
+    local newW = c.ax == 1
+        and math.max(V.MIN_W, V.resizeStartSize.X + delta.X)
+        or  math.max(V.MIN_W, V.resizeStartSize.X - delta.X)
+    local newH = c.ay == 1
+        and math.max(V.MIN_H, V.resizeStartSize.Y + delta.Y)
+        or  math.max(V.MIN_H, V.resizeStartSize.Y - delta.Y)
+    local newX = c.ax == 0 and (V.resizeStartPos.X + (V.resizeStartSize.X - newW)) or V.resizeStartPos.X
+    local newY = c.ay == 0 and (V.resizeStartPos.Y + (V.resizeStartSize.Y - newH)) or V.resizeStartPos.Y
+
+    V.MainFrame.Size = UDim2.new(0, newW, 0, newH)
+    V.MainFrame.Position = UDim2.new(0, newX, 0, newY)
+end)
+
+V.UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType ~= Enum.UserInputType.Touch and
+       input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    V.resizing = false
+    V.resizeCorner = nil
+end)
+
+-- ========================
+-- LOGO BULAT
+-- ========================
+
+V.LogoRing = Instance.new("Frame")
+V.LogoRing.Size = UDim2.new(0, 30, 0, 30)
+V.LogoRing.Position = UDim2.new(0, 10, 0, 10)
+V.LogoRing.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
 V.LogoRing.BorderSizePixel = 0
 V.LogoRing.ZIndex = 2
 V.LogoRing.Visible = true
@@ -9450,6 +9740,169 @@ do -- === AUTO FARM (scoped) ===
             updateArPill(V.autoRebirthEnabled_af)
             if V.autoRebirthEnabled_af then
                 autoRebirthRunLoop()
+            end
+        end
+    end
+
+    -- ═══ Auto Upgrade Coop (y=78) ════════════════════════════════════
+    -- Identify Part upgrade coop SECARA STABLE (bukan index — order
+    -- GetChildren() boleh berubah lain server/rejoin). Setiap Part bawah
+    -- CoopUI yg ada ProximityPrompt confirmed ada struktur:
+    --   Part.SurfaceGui...TextLabel(name="label")  = "UPGRADE COOP" / "BUY FEEDER" / "UPGRADE FEEDER"
+    --   Part.SurfaceGui...TextLabel(name="below")  = "COST $9.0K" dll (LIVE, boleh naik ikut level)
+    -- Kita cari part yg label dia EXACTLY "UPGRADE COOP" setiap kali,
+    -- content-based bukan position-based — reliable tak kira server.
+    local function findLabelTextInGui(root, labelName)
+        for _, d in ipairs(root:GetDescendants()) do
+            if d:IsA("TextLabel") and d.Name == labelName then
+                return d
+            end
+        end
+        return nil
+    end
+
+    local function findCoopUpgradePart()
+        local CoopUI = workspace:FindFirstChild("Coops") and workspace.Coops:FindFirstChild("CoopUI")
+        if not CoopUI then return nil end
+        for _, child in ipairs(CoopUI:GetChildren()) do
+            if child:IsA("BasePart") then
+                local prompt = child:FindFirstChildOfClass("ProximityPrompt")
+                local surfaceGui = child:FindFirstChildOfClass("SurfaceGui")
+                if prompt and surfaceGui then
+                    local lbl = findLabelTextInGui(surfaceGui, "label")
+                    if lbl and lbl.Text == "UPGRADE COOP" then
+                        local belowLbl = findLabelTextInGui(surfaceGui, "below")
+                        return child, prompt, belowLbl
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
+    -- Parse "COST $9.0K" / "COST $612" / "$1.2M" / "$3B" dll ke nombor.
+    local function parseCostText(text)
+        if not text then return nil end
+        local numStr, suffix = string.match(text, "%$?([%d%.]+)%s*([KMB]?)")
+        if not numStr then return nil end
+        local n = tonumber(numStr)
+        if not n then return nil end
+        if suffix == "K" then n = n * 1e3
+        elseif suffix == "M" then n = n * 1e6
+        elseif suffix == "B" then n = n * 1e9 end
+        return n
+    end
+
+    V.autoUpgradeCoopEnabled_af = false
+    local autoUpgradeCoopLoopRunning = false
+
+    local function autoUpgradeCoopRunLoop()
+        if autoUpgradeCoopLoopRunning then return end
+        autoUpgradeCoopLoopRunning = true
+        task.spawn(function()
+            while V.autoUpgradeCoopEnabled_af do
+                local ok = pcall(function()
+                    local part, prompt, belowLbl = findCoopUpgradePart()
+                    if part and prompt and belowLbl then
+                        local cost = parseCostText(belowLbl.Text)
+                        local ls = V.LocalPlayer:FindFirstChild("leaderstats")
+                        local moneyStat = ls and ls:FindFirstChild("Money")
+                        local money = moneyStat and moneyStat.Value
+                        if cost and money and money >= cost then
+                            fireproximityprompt(prompt)
+                        end
+                    end
+                end)
+                task.wait(1) -- check tiap 1 saat — live, ikut cost naik tiap upgrade
+            end
+            autoUpgradeCoopLoopRunning = false
+        end)
+    end
+
+    local aucRow = Instance.new("Frame")
+    aucRow.Size = UDim2.new(1, -8, 0, 22)
+    aucRow.Position = UDim2.new(0, 4, 0, 78)
+    aucRow.BackgroundTransparency = 1
+    aucRow.BorderSizePixel = 0
+    aucRow.Parent = V.afWrapper
+
+    local aucLbl = Instance.new("TextLabel")
+    aucLbl.Size = UDim2.new(0.55, 0, 1, 0)
+    aucLbl.BackgroundTransparency = 1
+    aucLbl.Text = "Auto Upgrade Coop"
+    aucLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    aucLbl.TextSize = 10
+    aucLbl.Font = Enum.Font.Gotham
+    aucLbl.TextXAlignment = Enum.TextXAlignment.Left
+    aucLbl.Parent = aucRow
+
+    local aucStateText = Instance.new("TextLabel")
+    aucStateText.Size = UDim2.new(0.18, 0, 1, 0)
+    aucStateText.Position = UDim2.new(0.55, 0, 0, 0)
+    aucStateText.BackgroundTransparency = 1
+    aucStateText.Text = "OFF"
+    aucStateText.TextColor3 = Color3.fromRGB(160, 160, 160)
+    aucStateText.TextSize = 10
+    aucStateText.Font = Enum.Font.GothamBold
+    aucStateText.TextXAlignment = Enum.TextXAlignment.Right
+    aucStateText.Parent = aucRow
+
+    local aucPillTrack = Instance.new("Frame")
+    aucPillTrack.Size = UDim2.new(0, 34, 0, 16)
+    aucPillTrack.Position = UDim2.new(1, -34, 0.5, -8)
+    aucPillTrack.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    aucPillTrack.BorderSizePixel = 0
+    aucPillTrack.Parent = aucRow
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = aucPillTrack end
+
+    local aucKnob = Instance.new("Frame")
+    aucKnob.Size = UDim2.new(0, 12, 0, 12)
+    aucKnob.Position = UDim2.new(0, 2, 0.5, -6)
+    aucKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    aucKnob.BorderSizePixel = 0
+    aucKnob.Parent = aucPillTrack
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = aucKnob end
+
+    local aucToggleHitbox = Instance.new("TextButton")
+    aucToggleHitbox.Size = UDim2.new(0, 34, 0, 16)
+    aucToggleHitbox.Position = UDim2.new(1, -34, 0.5, -8)
+    aucToggleHitbox.BackgroundTransparency = 1
+    aucToggleHitbox.Text = ""
+    aucToggleHitbox.Parent = aucRow
+
+    local aucPillTween = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
+
+    local function updateAucPill(on)
+        if on then
+            V.TweenService:Create(aucPillTrack, aucPillTween, {BackgroundColor3 = Color3.fromRGB(255,255,255)}):Play()
+            V.TweenService:Create(aucKnob, aucPillTween, {Position = UDim2.new(0,20,0.5,-6), BackgroundColor3 = Color3.fromRGB(0,0,0)}):Play()
+            aucStateText.Text = "ON";  aucStateText.TextColor3 = Color3.fromRGB(255,255,255)
+        else
+            V.TweenService:Create(aucPillTrack, aucPillTween, {BackgroundColor3 = Color3.fromRGB(60,60,60)}):Play()
+            V.TweenService:Create(aucKnob, aucPillTween, {Position = UDim2.new(0,2,0.5,-6), BackgroundColor3 = Color3.fromRGB(200,200,200)}):Play()
+            aucStateText.Text = "OFF"; aucStateText.TextColor3 = Color3.fromRGB(160,160,160)
+        end
+    end
+
+    aucToggleHitbox.MouseButton1Click:Connect(function()
+        V.autoUpgradeCoopEnabled_af = not V.autoUpgradeCoopEnabled_af
+        updateAucPill(V.autoUpgradeCoopEnabled_af)
+        if V.autoUpgradeCoopEnabled_af then
+            autoUpgradeCoopRunLoop()
+        end
+    end)
+
+    -- cfg: Auto Upgrade Coop toggle
+    V.cfgRead["auto_upgrade_coop"] = function()
+        return {en = V.autoUpgradeCoopEnabled_af}
+    end
+    V.cfgApply["auto_upgrade_coop"] = function(t)
+        local wantOn = (t.en == true)
+        if V.autoUpgradeCoopEnabled_af ~= wantOn then
+            V.autoUpgradeCoopEnabled_af = wantOn
+            updateAucPill(V.autoUpgradeCoopEnabled_af)
+            if V.autoUpgradeCoopEnabled_af then
+                autoUpgradeCoopRunLoop()
             end
         end
     end
