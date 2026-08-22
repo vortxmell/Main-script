@@ -9691,8 +9691,53 @@ do -- === AUTO FARM (scoped) ===
         return n
     end
 
-    -- Seed sekali masa script start.
-    V.rebirthCount_af = rebirthReadCountFromGui() or 0
+    -- ══════════════════════════════════════════════════════════════
+    -- FIX (2026-08-23, susulan): GUI-label parsing tetap FRAGILE walau
+    -- dah kena regex ketat + sanity bound — label tu boleh je "betul
+    -- rupa" tapi still salah (contoh: GUI belum refresh lepas rebirth
+    -- baru, atau UI lain kebetulan reuse path index sama). Punca akar
+    -- sebenar: kita cuba "teka" rebirth count dari TEXT, sedangkan
+    -- Tower floor (cur) kita baca terus dari leaderstats.Tower — DATA
+    -- SEBENAR, bukan teka dari UI. Rebirth count patut sama reliable.
+    --
+    -- Fix: cuba leaderstats DULU (beberapa nama biasa) sebagai SUMBER
+    -- UTAMA — cuma fallback ke GUI-text-parse kalau leaderstats tak
+    -- ada field yg sepadan. Kalau leaderstats field wujud & value dia
+    -- munasabah, guna terus (skip GUI parse sepenuhnya — lagi robust).
+    --
+    -- NOTA UNTUK MEL: kalau lepas ni V.rebirthCount_af MASIH salah,
+    -- besar kemungkinan nama field leaderstats untuk rebirth count ni
+    -- BUKAN salah satu dari senarai di bawah — scan
+    -- `Players.Thexmell.leaderstats` guna rSpy/Explorer, confirm nama
+    -- field sebenar, then bagitau supaya boleh tambah terus.
+    -- ══════════════════════════════════════════════════════════════
+    local REBIRTH_LEADERSTAT_KEYS = {
+        "Rebirths", "Rebirth", "RebirthCount", "Rebirth Count", "RB",
+    }
+
+    local function rebirthReadCountFromLeaderstats()
+        local ls = V.LocalPlayer:FindFirstChild("leaderstats")
+        if not ls then return nil end
+        for _, key in ipairs(REBIRTH_LEADERSTAT_KEYS) do
+            local stat = ls:FindFirstChild(key)
+            if stat and typeof(stat.Value) == "number" then
+                local n = stat.Value
+                if n >= 0 and n <= REBIRTH_COUNT_SANE_MAX then
+                    return math.floor(n)
+                end
+            end
+        end
+        return nil
+    end
+
+    local function rebirthReadCount()
+        return rebirthReadCountFromLeaderstats() or rebirthReadCountFromGui()
+    end
+
+    -- Seed sekali masa script start. leaderstats (kalau wujud) diutamakan
+    -- — punca akar sebenar utk bug "RB#10000": GUI-text-parse cuma
+    -- fallback last-resort sekarang.
+    V.rebirthCount_af = rebirthReadCount() or 0
 
     local function rebirthGetCurrentFloor()
         local ls = V.LocalPlayer:FindFirstChild("leaderstats")
@@ -9713,19 +9758,20 @@ do -- === AUTO FARM (scoped) ===
     end
 
     local function rebirthGetProgress()
-        -- Self-heal opportunistic: kalau GUI kebetulan terbuka, sync
-        -- counter — cover kes rebirth berlaku di luar auto-loop kita
-        -- (cth rebirth manual oleh user).
-        -- FIX: safety layer kedua — cuma terima bacaan GUI kalau beza
-        -- kecil dari counter sedia ada (bukan lonjakan besar mengarut).
-        -- Exception: kalau counter kita masih 0 (belum pernah seed
-        -- betul2), terima apa-apa bacaan sane (dah filter kat
-        -- rebirthReadCountFromGui) sebagai baseline pertama.
-        local guiN = rebirthReadCountFromGui()
-        if guiN and guiN ~= V.rebirthCount_af then
-            local delta = math.abs(guiN - V.rebirthCount_af)
-            if V.rebirthCount_af == 0 or delta <= 3 then
-                V.rebirthCount_af = guiN
+        -- Self-heal: leaderstats (kalau wujud) ialah SUMBER TEPAT —
+        -- terima terus tiap poll, tak perlu guard delta (bukan teka).
+        -- GUI-text-parse (fallback, kalau leaderstats takde field
+        -- sepadan) kekal guarded (delta<=3) sebab kurang reliable.
+        local lsN = rebirthReadCountFromLeaderstats()
+        if lsN then
+            V.rebirthCount_af = lsN
+        else
+            local guiN = rebirthReadCountFromGui()
+            if guiN and guiN ~= V.rebirthCount_af then
+                local delta = math.abs(guiN - V.rebirthCount_af)
+                if V.rebirthCount_af == 0 or delta <= 3 then
+                    V.rebirthCount_af = guiN
+                end
             end
         end
         local cur = rebirthGetCurrentFloor()
