@@ -9824,7 +9824,17 @@ do -- === AUTO FARM (scoped) ===
                         print("[AutoUpgradeCoop][Debug] leaderstats.Money TAK JUMPA. Stat sedia ada: " .. table.concat(names, ", "))
                         return
                     end
-                    local money = moneyStat.Value
+                    -- Money.Value rupanya STRING pre-formatted (contoh
+                    -- "158.6K"), bukan nombor mentah — guna parser K/M/B
+                    -- yang sama macam cost, elak error "compare number
+                    -- <= string".
+                    local rawMoney = moneyStat.Value
+                    local money
+                    if type(rawMoney) == "number" then
+                        money = rawMoney
+                    else
+                        money = parseCostText(tostring(rawMoney))
+                    end
                     print(string.format("[AutoUpgradeCoop][Debug] costText=%q parsedCost=%s money=%s",
                         belowLbl.Text, tostring(cost), tostring(money)))
                     if cost and money and money >= cost then
