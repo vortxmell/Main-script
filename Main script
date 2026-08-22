@@ -607,7 +607,7 @@ V.TOOLS_DROP_OPEN_H  = 80   -- Tools: Wall Tools row + Platform Tools row
 -- Farming dropdown: Auto Collect Scrap toggle row ditambah — open height
 -- naik dari 24 (kosong) ke 58 (header 24 + 1 divider + row 22 + padding).
 V.AF_DROP_CLOSED_H = 24
-V.AF_DROP_OPEN_H   = 148
+V.AF_DROP_OPEN_H   = 176
 V.afDropOpen = false
 -- Auto Farm UI handles (forward declare; assigned inside AUTO FARM block)
 -- ========================
@@ -9935,6 +9935,178 @@ do -- === AUTO FARM (scoped) ===
             updateAucPill(V.autoUpgradeCoopEnabled_af)
             if V.autoUpgradeCoopEnabled_af then
                 autoUpgradeCoopRunLoop()
+            end
+        end
+    end
+
+    -- ═══ Auto Upgrade Feeder — ROUND ROBIN (y=148) ═══════════════════
+    -- Bila Upgrade Coop, jumlah feeder bertambah. Setiap feeder ada
+    -- Part sendiri dgn label "UPGRADE FEEDER" (sama struktur macam
+    -- "UPGRADE COOP" — SurfaceGui > label/below). Per request Mel:
+    -- upgrade SATU LEVEL kat setiap feeder secara bergilir-gilir
+    -- (Feeder1 -> Feeder2 -> Feeder3 -> balik Feeder1...), BUKAN max
+    -- satu feeder dulu baru feeder lain.
+    --
+    -- Punca kenapa kita sort by Position (bukan guna GetChildren() index
+    -- terus): GetChildren() order tak dijamin stable across
+    -- server/rejoin, tapi Position fizikal setiap feeder KEKAL sama —
+    -- jadi sort ni bagi urutan round-robin yg consistent setiap scan.
+    local function findAllFeederUpgradeParts()
+        local CoopUI = workspace:FindFirstChild("Coops") and workspace.Coops:FindFirstChild("CoopUI")
+        if not CoopUI then return {} end
+        local list = {}
+        for _, child in ipairs(CoopUI:GetChildren()) do
+            if child:IsA("BasePart") then
+                local prompt = child:FindFirstChildOfClass("ProximityPrompt")
+                local surfaceGui = child:FindFirstChildOfClass("SurfaceGui")
+                if prompt and surfaceGui then
+                    local lbl = findLabelTextInGui(surfaceGui, "label")
+                    if lbl and lbl.Text == "UPGRADE FEEDER" then
+                        local belowLbl = findLabelTextInGui(surfaceGui, "below")
+                        table.insert(list, {part = child, prompt = prompt, belowLbl = belowLbl, pos = child.Position})
+                    end
+                end
+            end
+        end
+        table.sort(list, function(a, b)
+            if a.pos.X ~= b.pos.X then return a.pos.X < b.pos.X end
+            return a.pos.Z < b.pos.Z
+        end)
+        return list
+    end
+
+    V.autoUpgradeFeederEnabled_af = false
+    V.feederRRIndex_af = 1
+    local autoUpgradeFeederLoopRunning = false
+
+    local function autoUpgradeFeederRunLoop()
+        if autoUpgradeFeederLoopRunning then return end
+        autoUpgradeFeederLoopRunning = true
+        task.spawn(function()
+            while V.autoUpgradeFeederEnabled_af do
+                local ok, err = pcall(function()
+                    local list = findAllFeederUpgradeParts()
+                    if #list == 0 then
+                        print("[AutoUpgradeFeeder][Debug] Takde Part 'UPGRADE FEEDER' jumpa")
+                        return
+                    end
+                    if V.feederRRIndex_af > #list then V.feederRRIndex_af = 1 end
+                    local entry = list[V.feederRRIndex_af]
+                    local cost = parseCostText(entry.belowLbl and entry.belowLbl.Text)
+
+                    local ls = V.LocalPlayer:FindFirstChild("leaderstats")
+                    local moneyStat = ls and ls:FindFirstChild("Money")
+                    local rawMoney = moneyStat and moneyStat.Value
+                    local money
+                    if type(rawMoney) == "number" then
+                        money = rawMoney
+                    elseif rawMoney ~= nil then
+                        money = parseCostText(tostring(rawMoney))
+                    end
+
+                    print(string.format("[AutoUpgradeFeeder][Debug] Feeder #%d/%d cost=%s money=%s",
+                        V.feederRRIndex_af, #list, tostring(cost), tostring(money)))
+
+                    if cost and money and money >= cost then
+                        fireproximityprompt(entry.prompt)
+                        print(string.format("[AutoUpgradeFeeder][Debug] Upgrade Feeder #%d — pindah ke feeder seterusnya (round robin)", V.feederRRIndex_af))
+                        V.feederRRIndex_af = V.feederRRIndex_af + 1
+                        if V.feederRRIndex_af > #list then V.feederRRIndex_af = 1 end
+                    end
+                end)
+                if not ok then
+                    print("[AutoUpgradeFeeder][ERROR] " .. tostring(err))
+                end
+                task.wait(1)
+            end
+            autoUpgradeFeederLoopRunning = false
+        end)
+    end
+
+    local aufRow = Instance.new("Frame")
+    aufRow.Size = UDim2.new(1, -8, 0, 22)
+    aufRow.Position = UDim2.new(0, 4, 0, 148)
+    aufRow.BackgroundTransparency = 1
+    aufRow.BorderSizePixel = 0
+    aufRow.Parent = V.afWrapper
+
+    local aufLbl = Instance.new("TextLabel")
+    aufLbl.Size = UDim2.new(0.55, 0, 1, 0)
+    aufLbl.BackgroundTransparency = 1
+    aufLbl.Text = "Auto Upgrade Feeder"
+    aufLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    aufLbl.TextSize = 10
+    aufLbl.Font = Enum.Font.Gotham
+    aufLbl.TextXAlignment = Enum.TextXAlignment.Left
+    aufLbl.Parent = aufRow
+
+    local aufStateText = Instance.new("TextLabel")
+    aufStateText.Size = UDim2.new(0.18, 0, 1, 0)
+    aufStateText.Position = UDim2.new(0.55, 0, 0, 0)
+    aufStateText.BackgroundTransparency = 1
+    aufStateText.Text = "OFF"
+    aufStateText.TextColor3 = Color3.fromRGB(160, 160, 160)
+    aufStateText.TextSize = 10
+    aufStateText.Font = Enum.Font.GothamBold
+    aufStateText.TextXAlignment = Enum.TextXAlignment.Right
+    aufStateText.Parent = aufRow
+
+    local aufPillTrack = Instance.new("Frame")
+    aufPillTrack.Size = UDim2.new(0, 34, 0, 16)
+    aufPillTrack.Position = UDim2.new(1, -34, 0.5, -8)
+    aufPillTrack.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    aufPillTrack.BorderSizePixel = 0
+    aufPillTrack.Parent = aufRow
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = aufPillTrack end
+
+    local aufKnob = Instance.new("Frame")
+    aufKnob.Size = UDim2.new(0, 12, 0, 12)
+    aufKnob.Position = UDim2.new(0, 2, 0.5, -6)
+    aufKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    aufKnob.BorderSizePixel = 0
+    aufKnob.Parent = aufPillTrack
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = aufKnob end
+
+    local aufToggleHitbox = Instance.new("TextButton")
+    aufToggleHitbox.Size = UDim2.new(0, 34, 0, 16)
+    aufToggleHitbox.Position = UDim2.new(1, -34, 0.5, -8)
+    aufToggleHitbox.BackgroundTransparency = 1
+    aufToggleHitbox.Text = ""
+    aufToggleHitbox.Parent = aufRow
+
+    local aufPillTween = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
+
+    local function updateAufPill(on)
+        if on then
+            V.TweenService:Create(aufPillTrack, aufPillTween, {BackgroundColor3 = Color3.fromRGB(255,255,255)}):Play()
+            V.TweenService:Create(aufKnob, aufPillTween, {Position = UDim2.new(0,20,0.5,-6), BackgroundColor3 = Color3.fromRGB(0,0,0)}):Play()
+            aufStateText.Text = "ON";  aufStateText.TextColor3 = Color3.fromRGB(255,255,255)
+        else
+            V.TweenService:Create(aufPillTrack, aufPillTween, {BackgroundColor3 = Color3.fromRGB(60,60,60)}):Play()
+            V.TweenService:Create(aufKnob, aufPillTween, {Position = UDim2.new(0,2,0.5,-6), BackgroundColor3 = Color3.fromRGB(200,200,200)}):Play()
+            aufStateText.Text = "OFF"; aufStateText.TextColor3 = Color3.fromRGB(160,160,160)
+        end
+    end
+
+    aufToggleHitbox.MouseButton1Click:Connect(function()
+        V.autoUpgradeFeederEnabled_af = not V.autoUpgradeFeederEnabled_af
+        updateAufPill(V.autoUpgradeFeederEnabled_af)
+        if V.autoUpgradeFeederEnabled_af then
+            autoUpgradeFeederRunLoop()
+        end
+    end)
+
+    -- cfg: Auto Upgrade Feeder toggle
+    V.cfgRead["auto_upgrade_feeder"] = function()
+        return {en = V.autoUpgradeFeederEnabled_af}
+    end
+    V.cfgApply["auto_upgrade_feeder"] = function(t)
+        local wantOn = (t.en == true)
+        if V.autoUpgradeFeederEnabled_af ~= wantOn then
+            V.autoUpgradeFeederEnabled_af = wantOn
+            updateAufPill(V.autoUpgradeFeederEnabled_af)
+            if V.autoUpgradeFeederEnabled_af then
+                autoUpgradeFeederRunLoop()
             end
         end
     end
