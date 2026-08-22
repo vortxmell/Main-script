@@ -607,7 +607,7 @@ V.TOOLS_DROP_OPEN_H  = 80   -- Tools: Wall Tools row + Platform Tools row
 -- Farming dropdown: Auto Collect Scrap toggle row ditambah — open height
 -- naik dari 24 (kosong) ke 58 (header 24 + 1 divider + row 22 + padding).
 V.AF_DROP_CLOSED_H = 24
-V.AF_DROP_OPEN_H   = 104
+V.AF_DROP_OPEN_H   = 148
 V.afDropOpen = false
 -- Auto Farm UI handles (forward declare; assigned inside AUTO FARM block)
 -- ========================
@@ -9864,6 +9864,265 @@ do -- === AUTO FARM (scoped) ===
             updateArPill(V.autoRebirthEnabled_af)
             if V.autoRebirthEnabled_af then
                 autoRebirthRunLoop()
+            end
+        end
+    end
+
+    -- ═══ Auto Tower ═══════════════════════════════════════════════
+    -- Flow (dah test standalone sebelum ni — coop_scan.lua,
+    -- get_my_coop.lua, get_my_chicken_level.lua, test_skip_v2.lua):
+    --   1. Live check level chicken sendiri: LocalPlayer attr "Plot" →
+    --      workspace.Coops.Coop<plot> (confirmed betul across banyak
+    --      server) → cari workspace.ChickenBodies yg nama ada
+    --      "coop:<plot>" → baca .BillboardGui.Frame.canvas.text.name.lvl
+    --   2. Fire ReplicatedStorage.Remotes.TowerStart:InvokeServer() bila
+    --      level chicken CROSS satu tier baru (langkah 10: 10,20,30,...).
+    --      Tier semasa di-seed masa toggle ON (elak fire immediate utk
+    --      tier yg dah pun dicapai — cuma fire bila naik ke tier SETERUSNYA).
+    --   3. Bila UI TowerContinue (skip button) muncul (tower settle/KO),
+    --      auto fire ReplicatedStorage.Remotes.TowerContinueDecline
+    --      (confirmed berjaya across banyak server — test_skip_v2.lua).
+    --   4. Loop balik ke step 1.
+    local function atSafeNavigate(root, ...)
+        local node = root
+        for _, name in ipairs({...}) do
+            if not node then return nil end
+            node = node:FindFirstChild(name)
+        end
+        return node
+    end
+
+    local function atGetMyCoop()
+        local plot = V.LocalPlayer:GetAttribute("Plot")
+        if not plot then return nil, nil end
+        local coopsFolder = workspace:FindFirstChild("Coops")
+        local coop = coopsFolder and coopsFolder:FindFirstChild("Coop" .. tostring(plot))
+        return coop, plot
+    end
+
+    local function atGetMyChickenLevel()
+        local _, plot = atGetMyCoop()
+        if not plot then return nil end
+        local bodies = workspace:FindFirstChild("ChickenBodies")
+        if not bodies then return nil end
+        for _, body in ipairs(bodies:GetChildren()) do
+            if body.Name:find("coop:" .. tostring(plot), 1, true) then
+                local lvlNode = atSafeNavigate(body, "BillboardGui", "Frame", "canvas", "text", "name", "lvl")
+                if lvlNode then
+                    local raw = nil
+                    if lvlNode:IsA("TextLabel") or lvlNode:IsA("TextButton") then
+                        raw = lvlNode.Text
+                    elseif lvlNode:IsA("ValueBase") then
+                        raw = tostring(lvlNode.Value)
+                    end
+                    local n = raw and tonumber((raw:gsub("%D", "")))
+                    if n then return n end
+                end
+            end
+        end
+        return nil
+    end
+
+    local function atGetSkipBtn()
+        local gui = V.LocalPlayer:FindFirstChild("PlayerGui")
+        return atSafeNavigate(gui, "TowerContinue", "Frame", "card", "face", "skip")
+    end
+
+    local function atFireTowerStart()
+        local ok, result = pcall(function()
+            local Event = game:GetService("ReplicatedStorage").Remotes.TowerStart
+            return table.pack(Event:InvokeServer())
+        end)
+        if not ok then return false end
+        local r = result[1]
+        return type(r) == "table" and r.ok == true
+    end
+
+    local function atFireDecline()
+        pcall(function()
+            local Event = game:GetService("ReplicatedStorage").Remotes.TowerContinueDecline
+            Event:FireServer()
+        end)
+    end
+
+    local AT_CHECK_INTERVAL     = 2   -- saat antara check level bila idle
+    local AT_TOWER_WAIT_TIMEOUT = 120 -- saat max tunggu UI TowerContinue lepas TowerStart
+    local AT_UI_POLL_INTERVAL   = 0.3
+
+    -- Tunggu UI TowerContinue muncul (tower settle/KO), fire decline,
+    -- tunggu UI betul2 hilang (elak double-fire) sebelum return.
+    local function atWaitForContinueUiAndSkip()
+        local giveUp = tick() + AT_TOWER_WAIT_TIMEOUT
+        while V.autoTowerEnabled_af and tick() < giveUp do
+            if atGetSkipBtn() then
+                atFireDecline()
+                local giveUp2 = tick() + 5
+                while atGetSkipBtn() and tick() < giveUp2 do
+                    task.wait(AT_UI_POLL_INTERVAL)
+                end
+                return true
+            end
+            task.wait(AT_UI_POLL_INTERVAL)
+        end
+        return false
+    end
+
+    -- ── Auto Tower status row (y=100) ──────────────────────────────
+    local atStatusRow = Instance.new("Frame")
+    atStatusRow.Size = UDim2.new(1, -8, 0, 16)
+    atStatusRow.Position = UDim2.new(0, 4, 0, 100)
+    atStatusRow.BackgroundTransparency = 1
+    atStatusRow.Parent = V.afWrapper
+
+    local atStatusLbl = Instance.new("TextLabel")
+    atStatusLbl.Size = UDim2.new(1, 0, 1, 0)
+    atStatusLbl.BackgroundTransparency = 1
+    atStatusLbl.Text = "Auto Tower: Lv -- (Coop --)"
+    atStatusLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
+    atStatusLbl.TextSize = 9
+    atStatusLbl.Font = Enum.Font.Gotham
+    atStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
+    atStatusLbl.Parent = atStatusRow
+
+    local function updateAtStatusLabel()
+        local _, plot = atGetMyCoop()
+        local lvl = atGetMyChickenLevel()
+        if lvl and plot then
+            atStatusLbl.Text = string.format("Auto Tower: Lv %d (Coop %s)", lvl, tostring(plot))
+        else
+            atStatusLbl.Text = "Auto Tower: Lv -- (Coop --)"
+        end
+    end
+
+    -- Live-refresh label setiap 1 saat.
+    task.spawn(function()
+        while true do
+            pcall(updateAtStatusLabel)
+            task.wait(1)
+        end
+    end)
+
+    -- ── Auto Tower toggle (y=120) ──────────────────────────────────
+    V.autoTowerEnabled_af = false
+    local autoTowerLoopRunning = false
+    local autoTowerLastTier = 0
+
+    local function autoTowerRunLoop()
+        if autoTowerLoopRunning then return end
+        autoTowerLoopRunning = true
+        task.spawn(function()
+            -- Seed tier semasa toggle ON — elak fire immediate utk tier
+            -- yg chicken dah pun berada, cuma fire bila CROSS tier baru.
+            local lvl0 = atGetMyChickenLevel()
+            autoTowerLastTier = lvl0 and math.floor(lvl0 / 10) or 0
+
+            while V.autoTowerEnabled_af do
+                local lvl = atGetMyChickenLevel()
+                if lvl then
+                    local tier = math.floor(lvl / 10)
+                    if tier > autoTowerLastTier and tier >= 1 then
+                        local fired = atFireTowerStart()
+                        if fired then
+                            autoTowerLastTier = tier
+                            atWaitForContinueUiAndSkip()
+                        else
+                            task.wait(AT_CHECK_INTERVAL) -- gagal fire, retry lepas ni
+                        end
+                    else
+                        task.wait(AT_CHECK_INTERVAL)
+                    end
+                else
+                    task.wait(AT_CHECK_INTERVAL)
+                end
+            end
+            autoTowerLoopRunning = false
+        end)
+    end
+
+    local atRow = Instance.new("Frame")
+    atRow.Size = UDim2.new(1, -8, 0, 22)
+    atRow.Position = UDim2.new(0, 4, 0, 120)
+    atRow.BackgroundTransparency = 1
+    atRow.BorderSizePixel = 0
+    atRow.Parent = V.afWrapper
+
+    local atLbl = Instance.new("TextLabel")
+    atLbl.Size = UDim2.new(0.55, 0, 1, 0)
+    atLbl.BackgroundTransparency = 1
+    atLbl.Text = "Auto Tower"
+    atLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    atLbl.TextSize = 10
+    atLbl.Font = Enum.Font.Gotham
+    atLbl.TextXAlignment = Enum.TextXAlignment.Left
+    atLbl.Parent = atRow
+
+    local atStateText = Instance.new("TextLabel")
+    atStateText.Size = UDim2.new(0.18, 0, 1, 0)
+    atStateText.Position = UDim2.new(0.55, 0, 0, 0)
+    atStateText.BackgroundTransparency = 1
+    atStateText.Text = "OFF"
+    atStateText.TextColor3 = Color3.fromRGB(160, 160, 160)
+    atStateText.TextSize = 10
+    atStateText.Font = Enum.Font.GothamBold
+    atStateText.TextXAlignment = Enum.TextXAlignment.Right
+    atStateText.Parent = atRow
+
+    local atPillTrack = Instance.new("Frame")
+    atPillTrack.Size = UDim2.new(0, 34, 0, 16)
+    atPillTrack.Position = UDim2.new(1, -34, 0.5, -8)
+    atPillTrack.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    atPillTrack.BorderSizePixel = 0
+    atPillTrack.Parent = atRow
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = atPillTrack end
+
+    local atKnob = Instance.new("Frame")
+    atKnob.Size = UDim2.new(0, 12, 0, 12)
+    atKnob.Position = UDim2.new(0, 2, 0.5, -6)
+    atKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    atKnob.BorderSizePixel = 0
+    atKnob.Parent = atPillTrack
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = atKnob end
+
+    local atToggleHitbox = Instance.new("TextButton")
+    atToggleHitbox.Size = UDim2.new(0, 34, 0, 16)
+    atToggleHitbox.Position = UDim2.new(1, -34, 0.5, -8)
+    atToggleHitbox.BackgroundTransparency = 1
+    atToggleHitbox.Text = ""
+    atToggleHitbox.Parent = atRow
+
+    local atPillTween = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
+
+    local function updateAtPill(on)
+        if on then
+            V.TweenService:Create(atPillTrack, atPillTween, {BackgroundColor3 = Color3.fromRGB(255,255,255)}):Play()
+            V.TweenService:Create(atKnob, atPillTween, {Position = UDim2.new(0,20,0.5,-6), BackgroundColor3 = Color3.fromRGB(0,0,0)}):Play()
+            atStateText.Text = "ON";  atStateText.TextColor3 = Color3.fromRGB(255,255,255)
+        else
+            V.TweenService:Create(atPillTrack, atPillTween, {BackgroundColor3 = Color3.fromRGB(60,60,60)}):Play()
+            V.TweenService:Create(atKnob, atPillTween, {Position = UDim2.new(0,2,0.5,-6), BackgroundColor3 = Color3.fromRGB(200,200,200)}):Play()
+            atStateText.Text = "OFF"; atStateText.TextColor3 = Color3.fromRGB(160,160,160)
+        end
+    end
+
+    atToggleHitbox.MouseButton1Click:Connect(function()
+        V.autoTowerEnabled_af = not V.autoTowerEnabled_af
+        updateAtPill(V.autoTowerEnabled_af)
+        if V.autoTowerEnabled_af then
+            autoTowerRunLoop()
+        end
+    end)
+
+    -- cfg: Auto Tower toggle
+    V.cfgRead["auto_tower"] = function()
+        return {en = V.autoTowerEnabled_af}
+    end
+    V.cfgApply["auto_tower"] = function(t)
+        local wantOn = (t.en == true)
+        if V.autoTowerEnabled_af ~= wantOn then
+            V.autoTowerEnabled_af = wantOn
+            updateAtPill(V.autoTowerEnabled_af)
+            if V.autoTowerEnabled_af then
+                autoTowerRunLoop()
             end
         end
     end
