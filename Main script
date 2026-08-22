@@ -9801,18 +9801,40 @@ do -- === AUTO FARM (scoped) ===
         autoUpgradeCoopLoopRunning = true
         task.spawn(function()
             while V.autoUpgradeCoopEnabled_af do
-                local ok = pcall(function()
+                local ok, err = pcall(function()
                     local part, prompt, belowLbl = findCoopUpgradePart()
-                    if part and prompt and belowLbl then
-                        local cost = parseCostText(belowLbl.Text)
-                        local ls = V.LocalPlayer:FindFirstChild("leaderstats")
-                        local moneyStat = ls and ls:FindFirstChild("Money")
-                        local money = moneyStat and moneyStat.Value
-                        if cost and money and money >= cost then
-                            fireproximityprompt(prompt)
-                        end
+                    if not part then
+                        print("[AutoUpgradeCoop][Debug] Part 'UPGRADE COOP' TAK JUMPA — cari lagi cycle depan")
+                        return
+                    end
+                    if not belowLbl then
+                        print("[AutoUpgradeCoop][Debug] Part jumpa tapi label 'below' (cost) TAK JUMPA")
+                        return
+                    end
+                    local cost = parseCostText(belowLbl.Text)
+                    local ls = V.LocalPlayer:FindFirstChild("leaderstats")
+                    if not ls then
+                        print("[AutoUpgradeCoop][Debug] leaderstats TAK JUMPA pada LocalPlayer")
+                        return
+                    end
+                    local moneyStat = ls:FindFirstChild("Money")
+                    if not moneyStat then
+                        local names = {}
+                        for _, s in ipairs(ls:GetChildren()) do table.insert(names, s.Name) end
+                        print("[AutoUpgradeCoop][Debug] leaderstats.Money TAK JUMPA. Stat sedia ada: " .. table.concat(names, ", "))
+                        return
+                    end
+                    local money = moneyStat.Value
+                    print(string.format("[AutoUpgradeCoop][Debug] costText=%q parsedCost=%s money=%s",
+                        belowLbl.Text, tostring(cost), tostring(money)))
+                    if cost and money and money >= cost then
+                        print("[AutoUpgradeCoop][Debug] Syarat cukup — FIRING proximityprompt...")
+                        fireproximityprompt(prompt)
                     end
                 end)
+                if not ok then
+                    print("[AutoUpgradeCoop][ERROR] " .. tostring(err))
+                end
                 task.wait(1) -- check tiap 1 saat — live, ikut cost naik tiap upgrade
             end
             autoUpgradeCoopLoopRunning = false
