@@ -9963,7 +9963,11 @@ do -- === AUTO FARM (scoped) ===
                     local lbl = findLabelTextInGui(surfaceGui, "label")
                     if lbl and lbl.Text == labelText then
                         local belowLbl = findLabelTextInGui(surfaceGui, "below")
-                        table.insert(list, {part = child, prompt = prompt, belowLbl = belowLbl, pos = child.Position})
+                        -- Level tersimpan pada label berasingan (Name = "name"),
+                        -- Text cth "FEEDER Lv.15" — parse nombor selepas "Lv.".
+                        local nameLbl = findLabelTextInGui(surfaceGui, "name")
+                        local level = nameLbl and tonumber(nameLbl.Text:match("Lv%.(%d+)"))
+                        table.insert(list, {part = child, prompt = prompt, belowLbl = belowLbl, pos = child.Position, level = level})
                     end
                 end
             end
@@ -9986,7 +9990,6 @@ do -- === AUTO FARM (scoped) ===
     end
 
     V.autoUpgradeFeederEnabled_af = false
-    V.feederRRIndex_af = 1
     local autoUpgradeFeederLoopRunning = false
 
     local function autoUpgradeFeederRunLoop()
@@ -10025,15 +10028,32 @@ do -- === AUTO FARM (scoped) ===
                         end
                     end
 
-                    -- Phase B: UPGRADE FEEDER round-robin (logic asal, tak diubah)
+                    -- Phase B: UPGRADE FEEDER — LEVEL EQUALIZE (bukan round-robin
+                    -- ikut posisi lagi). Cari level PALING RENDAH antara semua
+                    -- feeder yg belum maxed, upgrade HANYA feeder(s) pada level
+                    -- tu. Bila dah sama level dgn tier seterusnya, tick
+                    -- seterusnya akan re-scan & candidate set naik sekali.
+                    -- Cth: [5,5,5,4,4,1] -> upgrade feeder lvl1 je sampai jadi
+                    -- 4, lepas tu [5,5,5,4,4,4] -> upgrade ketiga2 lvl4 sekali
+                    -- sampai jadi 5, lepas tu semua sama & naik bersama.
                     local list = findAllFeederUpgradeParts()
                     if #list == 0 then
                         print("[AutoUpgradeFeeder][Debug] Takde Part 'UPGRADE FEEDER' jumpa")
                         return
                     end
-                    if V.feederRRIndex_af > #list then V.feederRRIndex_af = 1 end
-                    local entry = list[V.feederRRIndex_af]
-                    local cost = parseCostText(entry.belowLbl and entry.belowLbl.Text)
+
+                    local minLevel = nil
+                    for _, e in ipairs(list) do
+                        if e.level then
+                            if not minLevel or e.level < minLevel then
+                                minLevel = e.level
+                            end
+                        end
+                    end
+                    if not minLevel then
+                        print("[AutoUpgradeFeeder][Debug] Tak jumpa level pada mana-mana feeder — skip cycle ni")
+                        return
+                    end
 
                     local ls = V.LocalPlayer:FindFirstChild("leaderstats")
                     local moneyStat = ls and ls:FindFirstChild("Money")
@@ -10045,14 +10065,19 @@ do -- === AUTO FARM (scoped) ===
                         money = parseCostText(tostring(rawMoney))
                     end
 
-                    print(string.format("[AutoUpgradeFeeder][Debug] Feeder #%d/%d cost=%s money=%s",
-                        V.feederRRIndex_af, #list, tostring(cost), tostring(money)))
-
-                    if cost and money and money >= cost then
-                        fireproximityprompt(entry.prompt)
-                        print(string.format("[AutoUpgradeFeeder][Debug] Upgrade Feeder #%d — pindah ke feeder seterusnya (round robin)", V.feederRRIndex_af))
-                        V.feederRRIndex_af = V.feederRRIndex_af + 1
-                        if V.feederRRIndex_af > #list then V.feederRRIndex_af = 1 end
+                    for _, entry in ipairs(list) do
+                        if entry.level == minLevel then
+                            local cost = parseCostText(entry.belowLbl and entry.belowLbl.Text)
+                            print(string.format("[AutoUpgradeFeeder][Debug] Feeder Lv.%s (min=%s) cost=%s money=%s",
+                                tostring(entry.level), tostring(minLevel), tostring(cost), tostring(money)))
+                            if cost and money and money >= cost then
+                                fireproximityprompt(entry.prompt)
+                                print(string.format("[AutoUpgradeFeeder][Debug] Upgrade feeder Lv.%s -> Lv.%s", tostring(entry.level), tostring((entry.level or 0) + 1)))
+                                -- tolak anggaran baki utk elak overspend kalau
+                                -- ada >1 feeder pada min level yg sama dlm cycle ni.
+                                money = money - cost
+                            end
+                        end
                     end
                 end)
                 if not ok then
