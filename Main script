@@ -10005,31 +10005,30 @@ do -- === AUTO FARM (scoped) ===
     -- ── Auto Tower toggle (y=120) ──────────────────────────────────
     V.autoTowerEnabled_af = false
     local autoTowerLoopRunning = false
-    local autoTowerLastTier = 0
+    -- FIX: bukan "tier" yg kena naik berterusan — Auto Rebirth RESET level
+    -- chicken balik ke 1, so level TAK selalu naik antara cycle (contoh
+    -- level 50 → rebirth → level 1 → naik balik). Logic betul: fire bila
+    -- level EXACT kena multiple of 10, DAN beza dari level terakhir yg
+    -- fire (elak spam berulang kat level SAMA) — tak kisah naik atau turun.
+    local autoTowerLastFiredLevel = nil
 
     local function autoTowerRunLoop()
         if autoTowerLoopRunning then return end
         autoTowerLoopRunning = true
         task.spawn(function()
-            -- Seed tier semasa toggle ON — elak fire immediate utk tier
-            -- yg chicken dah pun berada, cuma fire bila CROSS tier baru.
-            local lvl0 = atGetMyChickenLevel()
-            autoTowerLastTier = lvl0 and math.floor(lvl0 / 10) or 0
+            -- Seed level semasa toggle ON — elak fire immediate kalau
+            -- kebetulan chicken tengah duduk tepat di multiple of 10.
+            autoTowerLastFiredLevel = atGetMyChickenLevel()
 
             while V.autoTowerEnabled_af do
                 local lvl = atGetMyChickenLevel()
-                if lvl then
-                    local tier = math.floor(lvl / 10)
-                    if tier > autoTowerLastTier and tier >= 1 then
-                        local fired = atFireTowerStart()
-                        if fired then
-                            autoTowerLastTier = tier
-                            atWaitForContinueUiAndSkip()
-                        else
-                            task.wait(AT_CHECK_INTERVAL) -- gagal fire, retry lepas ni
-                        end
+                if lvl and lvl > 0 and lvl % 10 == 0 and lvl ~= autoTowerLastFiredLevel then
+                    local fired = atFireTowerStart()
+                    if fired then
+                        autoTowerLastFiredLevel = lvl
+                        atWaitForContinueUiAndSkip()
                     else
-                        task.wait(AT_CHECK_INTERVAL)
+                        task.wait(AT_CHECK_INTERVAL) -- gagal fire, retry lepas ni
                     end
                 else
                     task.wait(AT_CHECK_INTERVAL)
