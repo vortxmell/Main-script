@@ -9634,32 +9634,85 @@ do -- === AUTO FARM (scoped) ===
     end)
 
     -- ═══ Rebirth Status + Auto Rebirth ══════════════════════════
-    -- Text source: PlayerGui.Rebirth.Frame.window.panel.face.content
-    -- .content.body.reqCard.face.content.bar.text → format "cur / req"
-    -- cth "40 / 32" = tower floor sekarang 40, keperluan rebirth 32
-    -- (dah capai/lepasi keperluan, boleh rebirth).
-    local REBIRTH_TEXT_PATH = {
+    -- EXACT (confirmed via require() dump — bukan teori/sample-fit):
+    -- ReplicatedStorage.Core.Progression.RebirthBonus.requirementFloor(n)
+    -- ialah formula SEBENAR game utk kira requirement tower floor bagi
+    -- rebirth ke-n. Verified: requirementFloor(9) = 33, padan 100% dgn
+    -- screenshot UI "0/33" masa Rebirth #9.
+    --
+    -- Current floor: leaderstats.Tower.Value (live, confirmed sebelum ni).
+    -- Rebirth count: self-tracked — sebab AUTO REBIRTH KITA SENDIRI yang
+    -- fire Event:InvokeServer(), kita increment counter terus lepas setiap
+    -- rebirth berjaya (tak perlu baca apa2 dari luar). Counter di-seed dari
+    -- GUI count.s2 SEKALI bila script start (kalau UI kebetulan terbuka),
+    -- dan self-heal (re-sync) setiap kali GUI tu kebetulan ada — tapi
+    -- toggle/logic TAK bergantung padanya langsung selepas seed pertama.
+    local RebirthBonusMod
+    do
+        local ok, mod = pcall(function()
+            return require(game:GetService("ReplicatedStorage").Core.Progression.RebirthBonus)
+        end)
+        if ok then RebirthBonusMod = mod end
+    end
+
+    local REBIRTH_COUNT_PATH = {
         "Rebirth","Frame","window","panel","face","content",
-        "content","body","reqCard","face","content","bar","text",
+        "content","body","count","s2",
     }
 
-    local function rebirthGetTextLabel()
+    local function rebirthGetCountLabel()
         local node = V.LocalPlayer:FindFirstChild("PlayerGui")
-        for _, name in ipairs(REBIRTH_TEXT_PATH) do
+        for _, name in ipairs(REBIRTH_COUNT_PATH) do
             node = node and node:FindFirstChild(name)
         end
         return node
     end
 
+    -- Baca count.s2 GUI kalau kebetulan ada (self-heal opportunistic je,
+    -- bukan dependency wajib).
+    local function rebirthReadCountFromGui()
+        local ok, lbl = pcall(rebirthGetCountLabel)
+        if not ok or not lbl then return nil end
+        local n = string.match(lbl.Text, "(%d+)")
+        return n and tonumber(n) or nil
+    end
+
+    -- Seed sekali masa script start.
+    V.rebirthCount_af = rebirthReadCountFromGui() or 0
+
+    local function rebirthGetCurrentFloor()
+        local ls = V.LocalPlayer:FindFirstChild("leaderstats")
+        local towerStat = ls and ls:FindFirstChild("Tower")
+        if towerStat then return towerStat.Value end
+        return nil
+    end
+
+    local function rebirthGetRequirement()
+        if not RebirthBonusMod or typeof(RebirthBonusMod.requirementFloor) ~= "function" then
+            return nil
+        end
+        local ok, req = pcall(function()
+            return RebirthBonusMod.requirementFloor(V.rebirthCount_af)
+        end)
+        if ok and type(req) == "number" then return req end
+        return nil
+    end
+
     local function rebirthGetProgress()
-        local ok, lbl = pcall(rebirthGetTextLabel)
-        if not ok or not lbl then return nil, nil end
-        local cur, req = string.match(lbl.Text, "(%d+)%s*/%s*(%d+)")
-        if not cur or not req then return nil, nil end
-        return tonumber(cur), tonumber(req)
+        -- Self-heal opportunistic: kalau GUI kebetulan terbuka, sync
+        -- counter — cover kes rebirth berlaku di luar auto-loop kita
+        -- (cth rebirth manual oleh user).
+        local guiN = rebirthReadCountFromGui()
+        if guiN and guiN ~= V.rebirthCount_af then
+            V.rebirthCount_af = guiN
+        end
+        local cur = rebirthGetCurrentFloor()
+        local req = rebirthGetRequirement()
+        return cur, req
     end
 
     -- ── Rebirth status row (y=56) ────────────────────────────────
+
     local rebirthStatusRow = Instance.new("Frame")
     rebirthStatusRow.Size = UDim2.new(1, -8, 0, 16)
     rebirthStatusRow.Position = UDim2.new(0, 4, 0, 56)
@@ -9679,7 +9732,8 @@ do -- === AUTO FARM (scoped) ===
     local function updateRebirthStatusLabel()
         local cur, req = rebirthGetProgress()
         if cur and req then
-            rebirthStatusLbl.Text = string.format("Rebirth Status: tower floor %d/%d", cur, req)
+            rebirthStatusLbl.Text = string.format(
+                "Rebirth Status: tower floor %d/%d (RB#%d)", cur, req, V.rebirthCount_af)
             rebirthStatusLbl.TextColor3 = (cur >= req)
                 and Color3.fromRGB(120, 255, 120)
                 or  Color3.fromRGB(200, 200, 200)
@@ -9689,8 +9743,7 @@ do -- === AUTO FARM (scoped) ===
         end
     end
 
-    -- Live-refresh label setiap 1 saat (jalan sentiasa, bukan bergantung
-    -- pada toggle Auto Rebirth — supaya user nampak progress real-time).
+    -- Live-refresh label setiap 1 saat.
     task.spawn(function()
         while true do
             pcall(updateRebirthStatusLabel)
@@ -9709,11 +9762,16 @@ do -- === AUTO FARM (scoped) ===
             while V.autoRebirthEnabled_af do
                 local cur, req = rebirthGetProgress()
                 if cur and req and cur >= req then
-                    pcall(function()
+                    local ok = pcall(function()
                         local Event = game:GetService("ReplicatedStorage").Remotes.Rebirth
                         Event:InvokeServer()
                     end)
-                    task.wait(2) -- cooldown lepas fire, elak spam invoke sblm UI/text update
+                    if ok then
+                        -- Optimistic increment — kita yg fire rebirth ni,
+                        -- so kita dah tahu count naik +1 serta-merta.
+                        V.rebirthCount_af += 1
+                    end
+                    task.wait(2) -- cooldown lepas fire, elak spam invoke
                 else
                     task.wait(1)
                 end
