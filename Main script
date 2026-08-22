@@ -9633,193 +9633,11 @@ do -- === AUTO FARM (scoped) ===
         end
     end)
 
-    -- ═══ Rebirth Status + Auto Rebirth ══════════════════════════
-    -- EXACT (confirmed via require() dump — bukan teori/sample-fit):
-    -- ReplicatedStorage.Core.Progression.RebirthBonus.requirementFloor(n)
-    -- ialah formula SEBENAR game utk kira requirement tower floor bagi
-    -- rebirth ke-n. Verified: requirementFloor(9) = 33, padan 100% dgn
-    -- screenshot UI "0/33" masa Rebirth #9.
-    --
-    -- Current floor: leaderstats.Tower.Value (live, confirmed sebelum ni).
-    -- Rebirth count: self-tracked — sebab AUTO REBIRTH KITA SENDIRI yang
-    -- fire Event:InvokeServer(), kita increment counter terus lepas setiap
-    -- rebirth berjaya (tak perlu baca apa2 dari luar). Counter di-seed dari
-    -- GUI count.s2 SEKALI bila script start (kalau UI kebetulan terbuka),
-    -- dan self-heal (re-sync) setiap kali GUI tu kebetulan ada — tapi
-    -- toggle/logic TAK bergantung padanya langsung selepas seed pertama.
-    local RebirthBonusMod
-    do
-        local ok, mod = pcall(function()
-            return require(game:GetService("ReplicatedStorage").Core.Progression.RebirthBonus)
-        end)
-        if ok then RebirthBonusMod = mod end
-    end
-
-    local REBIRTH_COUNT_PATH = {
-        "Rebirth","Frame","window","panel","face","content",
-        "content","body","count","s2",
-    }
-
-    local function rebirthGetCountLabel()
-        local node = V.LocalPlayer:FindFirstChild("PlayerGui")
-        for _, name in ipairs(REBIRTH_COUNT_PATH) do
-            node = node and node:FindFirstChild(name)
-        end
-        return node
-    end
-
-    -- Baca count.s2 GUI kalau kebetulan ada (self-heal opportunistic je,
-    -- bukan dependency wajib).
-    -- FIX: bug "RB#10000 → requirement 66 (patut 36 utk RB#18)" — punca
-    -- ialah "(%d+)" generic terlalu longgar, boleh accidentally match
-    -- nombor lain dalam text label yg tak dijangka (bukan nombor rebirth
-    -- sebenar), corrupt V.rebirthCount_af terus dari seed pertama lagi
-    -- (self-heal pun tak boleh betulkan sebab baseline dah rosak sejak
-    -- awal). Fix: (a) target pattern lebih ketat "#<digit>" (format
-    -- sebenar UI "Rebirth #18"), (b) sanity bound — tolak terus kalau
-    -- angka tak masuk akal (>999, mustahil utk rebirth count realistik).
-    local REBIRTH_COUNT_SANE_MAX = 999
-
-    local function rebirthReadCountFromGui()
-        local ok, lbl = pcall(rebirthGetCountLabel)
-        if not ok or not lbl then return nil end
-        local n = string.match(lbl.Text, "#%s*(%d+)") or string.match(lbl.Text, "(%d+)")
-        n = n and tonumber(n) or nil
-        if n and (n < 0 or n > REBIRTH_COUNT_SANE_MAX) then
-            return nil -- tolak bacaan tak masuk akal (cth 10000)
-        end
-        return n
-    end
-
-    -- ══════════════════════════════════════════════════════════════
-    -- FIX (2026-08-23, susulan): GUI-label parsing tetap FRAGILE walau
-    -- dah kena regex ketat + sanity bound — label tu boleh je "betul
-    -- rupa" tapi still salah (contoh: GUI belum refresh lepas rebirth
-    -- baru, atau UI lain kebetulan reuse path index sama). Punca akar
-    -- sebenar: kita cuba "teka" rebirth count dari TEXT, sedangkan
-    -- Tower floor (cur) kita baca terus dari leaderstats.Tower — DATA
-    -- SEBENAR, bukan teka dari UI. Rebirth count patut sama reliable.
-    --
-    -- Fix: cuba leaderstats DULU (beberapa nama biasa) sebagai SUMBER
-    -- UTAMA — cuma fallback ke GUI-text-parse kalau leaderstats tak
-    -- ada field yg sepadan. Kalau leaderstats field wujud & value dia
-    -- munasabah, guna terus (skip GUI parse sepenuhnya — lagi robust).
-    --
-    -- NOTA UNTUK MEL: kalau lepas ni V.rebirthCount_af MASIH salah,
-    -- besar kemungkinan nama field leaderstats untuk rebirth count ni
-    -- BUKAN salah satu dari senarai di bawah — scan
-    -- `Players.Thexmell.leaderstats` guna rSpy/Explorer, confirm nama
-    -- field sebenar, then bagitau supaya boleh tambah terus.
-    -- ══════════════════════════════════════════════════════════════
-    local REBIRTH_LEADERSTAT_KEYS = {
-        "Rebirths", "Rebirth", "RebirthCount", "Rebirth Count", "RB",
-    }
-
-    local function rebirthReadCountFromLeaderstats()
-        local ls = V.LocalPlayer:FindFirstChild("leaderstats")
-        if not ls then return nil end
-        for _, key in ipairs(REBIRTH_LEADERSTAT_KEYS) do
-            local stat = ls:FindFirstChild(key)
-            if stat and typeof(stat.Value) == "number" then
-                local n = stat.Value
-                if n >= 0 and n <= REBIRTH_COUNT_SANE_MAX then
-                    return math.floor(n)
-                end
-            end
-        end
-        return nil
-    end
-
-    local function rebirthReadCount()
-        return rebirthReadCountFromLeaderstats() or rebirthReadCountFromGui()
-    end
-
-    -- Seed sekali masa script start. leaderstats (kalau wujud) diutamakan
-    -- — punca akar sebenar utk bug "RB#10000": GUI-text-parse cuma
-    -- fallback last-resort sekarang.
-    V.rebirthCount_af = rebirthReadCount() or 0
-
-    local function rebirthGetCurrentFloor()
-        local ls = V.LocalPlayer:FindFirstChild("leaderstats")
-        local towerStat = ls and ls:FindFirstChild("Tower")
-        if towerStat then return towerStat.Value end
-        return nil
-    end
-
-    local function rebirthGetRequirement()
-        if not RebirthBonusMod or typeof(RebirthBonusMod.requirementFloor) ~= "function" then
-            return nil
-        end
-        local ok, req = pcall(function()
-            return RebirthBonusMod.requirementFloor(V.rebirthCount_af)
-        end)
-        if ok and type(req) == "number" then return req end
-        return nil
-    end
-
-    local function rebirthGetProgress()
-        -- Self-heal: leaderstats (kalau wujud) ialah SUMBER TEPAT —
-        -- terima terus tiap poll, tak perlu guard delta (bukan teka).
-        -- GUI-text-parse (fallback, kalau leaderstats takde field
-        -- sepadan) kekal guarded (delta<=3) sebab kurang reliable.
-        local lsN = rebirthReadCountFromLeaderstats()
-        if lsN then
-            V.rebirthCount_af = lsN
-        else
-            local guiN = rebirthReadCountFromGui()
-            if guiN and guiN ~= V.rebirthCount_af then
-                local delta = math.abs(guiN - V.rebirthCount_af)
-                if V.rebirthCount_af == 0 or delta <= 3 then
-                    V.rebirthCount_af = guiN
-                end
-            end
-        end
-        local cur = rebirthGetCurrentFloor()
-        local req = rebirthGetRequirement()
-        return cur, req
-    end
-
-    -- ── Rebirth status row (y=56) ────────────────────────────────
-
-    local rebirthStatusRow = Instance.new("Frame")
-    rebirthStatusRow.Size = UDim2.new(1, -8, 0, 16)
-    rebirthStatusRow.Position = UDim2.new(0, 4, 0, 56)
-    rebirthStatusRow.BackgroundTransparency = 1
-    rebirthStatusRow.Parent = V.afWrapper
-
-    local rebirthStatusLbl = Instance.new("TextLabel")
-    rebirthStatusLbl.Size = UDim2.new(1, 0, 1, 0)
-    rebirthStatusLbl.BackgroundTransparency = 1
-    rebirthStatusLbl.Text = "Rebirth Status: tower floor --/--"
-    rebirthStatusLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
-    rebirthStatusLbl.TextSize = 9
-    rebirthStatusLbl.Font = Enum.Font.Gotham
-    rebirthStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
-    rebirthStatusLbl.Parent = rebirthStatusRow
-
-    local function updateRebirthStatusLabel()
-        local cur, req = rebirthGetProgress()
-        if cur and req then
-            rebirthStatusLbl.Text = string.format(
-                "Rebirth Status: tower floor %d/%d (RB#%d)", cur, req, V.rebirthCount_af)
-            rebirthStatusLbl.TextColor3 = (cur >= req)
-                and Color3.fromRGB(120, 255, 120)
-                or  Color3.fromRGB(200, 200, 200)
-        else
-            rebirthStatusLbl.Text = "Rebirth Status: tower floor --/--"
-            rebirthStatusLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
-        end
-    end
-
-    -- Live-refresh label setiap 1 saat.
-    task.spawn(function()
-        while true do
-            pcall(updateRebirthStatusLabel)
-            task.wait(1)
-        end
-    end)
-
-    -- ── Auto Rebirth toggle (y=76) ───────────────────────────────
+    -- ═══ Auto Rebirth — SIMPLE VERSION (per request Mel, 2026-08-23) ═══
+    -- Buang semua detect/check/status (requirement floor, leaderstats
+    -- parse, GUI label parse, dll — banyak method dah cuba, still
+    -- bermasalah). Sekarang: toggle ON -> fire remote Rebirth setiap 5
+    -- saat, straight up, takde logic lain langsung.
     V.autoRebirthEnabled_af = false
     local autoRebirthLoopRunning = false
 
@@ -9828,21 +9646,11 @@ do -- === AUTO FARM (scoped) ===
         autoRebirthLoopRunning = true
         task.spawn(function()
             while V.autoRebirthEnabled_af do
-                local cur, req = rebirthGetProgress()
-                if cur and req and cur >= req then
-                    local ok = pcall(function()
-                        local Event = game:GetService("ReplicatedStorage").Remotes.Rebirth
-                        Event:InvokeServer()
-                    end)
-                    if ok then
-                        -- Optimistic increment — kita yg fire rebirth ni,
-                        -- so kita dah tahu count naik +1 serta-merta.
-                        V.rebirthCount_af += 1
-                    end
-                    task.wait(2) -- cooldown lepas fire, elak spam invoke
-                else
-                    task.wait(1)
-                end
+                pcall(function()
+                    local Event = game:GetService("ReplicatedStorage").Remotes.Rebirth
+                    Event:InvokeServer()
+                end)
+                task.wait(5)
             end
             autoRebirthLoopRunning = false
         end)
@@ -9850,7 +9658,7 @@ do -- === AUTO FARM (scoped) ===
 
     local arRow = Instance.new("Frame")
     arRow.Size = UDim2.new(1, -8, 0, 22)
-    arRow.Position = UDim2.new(0, 4, 0, 76)
+    arRow.Position = UDim2.new(0, 4, 0, 56)
     arRow.BackgroundTransparency = 1
     arRow.BorderSizePixel = 0
     arRow.Parent = V.afWrapper
