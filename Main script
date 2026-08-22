@@ -10011,7 +10011,7 @@ do -- === AUTO FARM (scoped) ===
     -- Simple: random walk 3 studs dari posisi semasa, setiap interval
     -- tertentu — guna Humanoid:MoveTo() SAMA pattern macam Auto Collect
     -- Scrap punya walk method (acsWalkTo).
-    local ANTI_AFK_INTERVAL = 60 -- saat antara setiap random walk
+    local ANTI_AFK_INTERVAL = 900 -- saat antara setiap random walk
     local ANTI_AFK_DIST     = 3  -- studs
 
     V.antiAfkEnabled_af = false
