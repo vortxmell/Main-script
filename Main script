@@ -607,7 +607,7 @@ V.TOOLS_DROP_OPEN_H  = 80   -- Tools: Wall Tools row + Platform Tools row
 -- Farming dropdown: Auto Collect Scrap toggle row ditambah — open height
 -- naik dari 24 (kosong) ke 58 (header 24 + 1 divider + row 22 + padding).
 V.AF_DROP_CLOSED_H = 24
-V.AF_DROP_OPEN_H   = 58
+V.AF_DROP_OPEN_H   = 104
 V.afDropOpen = false
 -- Auto Farm UI handles (forward declare; assigned inside AUTO FARM block)
 -- ========================
@@ -9632,6 +9632,183 @@ do -- === AUTO FARM (scoped) ===
             acsRunLoop()
         end
     end)
+
+    -- ═══ Rebirth Status + Auto Rebirth ══════════════════════════
+    -- Text source: PlayerGui.Rebirth.Frame.window.panel.face.content
+    -- .content.body.reqCard.face.content.bar.text → format "cur / req"
+    -- cth "40 / 32" = tower floor sekarang 40, keperluan rebirth 32
+    -- (dah capai/lepasi keperluan, boleh rebirth).
+    local REBIRTH_TEXT_PATH = {
+        "Rebirth","Frame","window","panel","face","content",
+        "content","body","reqCard","face","content","bar","text",
+    }
+
+    local function rebirthGetTextLabel()
+        local node = V.LocalPlayer:FindFirstChild("PlayerGui")
+        for _, name in ipairs(REBIRTH_TEXT_PATH) do
+            node = node and node:FindFirstChild(name)
+        end
+        return node
+    end
+
+    local function rebirthGetProgress()
+        local ok, lbl = pcall(rebirthGetTextLabel)
+        if not ok or not lbl then return nil, nil end
+        local cur, req = string.match(lbl.Text, "(%d+)%s*/%s*(%d+)")
+        if not cur or not req then return nil, nil end
+        return tonumber(cur), tonumber(req)
+    end
+
+    -- ── Rebirth status row (y=56) ────────────────────────────────
+    local rebirthStatusRow = Instance.new("Frame")
+    rebirthStatusRow.Size = UDim2.new(1, -8, 0, 16)
+    rebirthStatusRow.Position = UDim2.new(0, 4, 0, 56)
+    rebirthStatusRow.BackgroundTransparency = 1
+    rebirthStatusRow.Parent = V.afWrapper
+
+    local rebirthStatusLbl = Instance.new("TextLabel")
+    rebirthStatusLbl.Size = UDim2.new(1, 0, 1, 0)
+    rebirthStatusLbl.BackgroundTransparency = 1
+    rebirthStatusLbl.Text = "Rebirth Status: tower floor --/--"
+    rebirthStatusLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
+    rebirthStatusLbl.TextSize = 9
+    rebirthStatusLbl.Font = Enum.Font.Gotham
+    rebirthStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
+    rebirthStatusLbl.Parent = rebirthStatusRow
+
+    local function updateRebirthStatusLabel()
+        local cur, req = rebirthGetProgress()
+        if cur and req then
+            rebirthStatusLbl.Text = string.format("Rebirth Status: tower floor %d/%d", cur, req)
+            rebirthStatusLbl.TextColor3 = (cur >= req)
+                and Color3.fromRGB(120, 255, 120)
+                or  Color3.fromRGB(200, 200, 200)
+        else
+            rebirthStatusLbl.Text = "Rebirth Status: tower floor --/--"
+            rebirthStatusLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
+        end
+    end
+
+    -- Live-refresh label setiap 1 saat (jalan sentiasa, bukan bergantung
+    -- pada toggle Auto Rebirth — supaya user nampak progress real-time).
+    task.spawn(function()
+        while true do
+            pcall(updateRebirthStatusLabel)
+            task.wait(1)
+        end
+    end)
+
+    -- ── Auto Rebirth toggle (y=76) ───────────────────────────────
+    V.autoRebirthEnabled_af = false
+    local autoRebirthLoopRunning = false
+
+    local function autoRebirthRunLoop()
+        if autoRebirthLoopRunning then return end
+        autoRebirthLoopRunning = true
+        task.spawn(function()
+            while V.autoRebirthEnabled_af do
+                local cur, req = rebirthGetProgress()
+                if cur and req and cur >= req then
+                    pcall(function()
+                        local Event = game:GetService("ReplicatedStorage").Remotes.Rebirth
+                        Event:InvokeServer()
+                    end)
+                    task.wait(2) -- cooldown lepas fire, elak spam invoke sblm UI/text update
+                else
+                    task.wait(1)
+                end
+            end
+            autoRebirthLoopRunning = false
+        end)
+    end
+
+    local arRow = Instance.new("Frame")
+    arRow.Size = UDim2.new(1, -8, 0, 22)
+    arRow.Position = UDim2.new(0, 4, 0, 76)
+    arRow.BackgroundTransparency = 1
+    arRow.BorderSizePixel = 0
+    arRow.Parent = V.afWrapper
+
+    local arLbl = Instance.new("TextLabel")
+    arLbl.Size = UDim2.new(0.55, 0, 1, 0)
+    arLbl.BackgroundTransparency = 1
+    arLbl.Text = "Auto Rebirth"
+    arLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    arLbl.TextSize = 10
+    arLbl.Font = Enum.Font.Gotham
+    arLbl.TextXAlignment = Enum.TextXAlignment.Left
+    arLbl.Parent = arRow
+
+    local arStateText = Instance.new("TextLabel")
+    arStateText.Size = UDim2.new(0.18, 0, 1, 0)
+    arStateText.Position = UDim2.new(0.55, 0, 0, 0)
+    arStateText.BackgroundTransparency = 1
+    arStateText.Text = "OFF"
+    arStateText.TextColor3 = Color3.fromRGB(160, 160, 160)
+    arStateText.TextSize = 10
+    arStateText.Font = Enum.Font.GothamBold
+    arStateText.TextXAlignment = Enum.TextXAlignment.Right
+    arStateText.Parent = arRow
+
+    local arPillTrack = Instance.new("Frame")
+    arPillTrack.Size = UDim2.new(0, 34, 0, 16)
+    arPillTrack.Position = UDim2.new(1, -34, 0.5, -8)
+    arPillTrack.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    arPillTrack.BorderSizePixel = 0
+    arPillTrack.Parent = arRow
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = arPillTrack end
+
+    local arKnob = Instance.new("Frame")
+    arKnob.Size = UDim2.new(0, 12, 0, 12)
+    arKnob.Position = UDim2.new(0, 2, 0.5, -6)
+    arKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    arKnob.BorderSizePixel = 0
+    arKnob.Parent = arPillTrack
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = arKnob end
+
+    local arToggleHitbox = Instance.new("TextButton")
+    arToggleHitbox.Size = UDim2.new(0, 34, 0, 16)
+    arToggleHitbox.Position = UDim2.new(1, -34, 0.5, -8)
+    arToggleHitbox.BackgroundTransparency = 1
+    arToggleHitbox.Text = ""
+    arToggleHitbox.Parent = arRow
+
+    local arPillTween = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
+
+    local function updateArPill(on)
+        if on then
+            V.TweenService:Create(arPillTrack, arPillTween, {BackgroundColor3 = Color3.fromRGB(255,255,255)}):Play()
+            V.TweenService:Create(arKnob, arPillTween, {Position = UDim2.new(0,20,0.5,-6), BackgroundColor3 = Color3.fromRGB(0,0,0)}):Play()
+            arStateText.Text = "ON";  arStateText.TextColor3 = Color3.fromRGB(255,255,255)
+        else
+            V.TweenService:Create(arPillTrack, arPillTween, {BackgroundColor3 = Color3.fromRGB(60,60,60)}):Play()
+            V.TweenService:Create(arKnob, arPillTween, {Position = UDim2.new(0,2,0.5,-6), BackgroundColor3 = Color3.fromRGB(200,200,200)}):Play()
+            arStateText.Text = "OFF"; arStateText.TextColor3 = Color3.fromRGB(160,160,160)
+        end
+    end
+
+    arToggleHitbox.MouseButton1Click:Connect(function()
+        V.autoRebirthEnabled_af = not V.autoRebirthEnabled_af
+        updateArPill(V.autoRebirthEnabled_af)
+        if V.autoRebirthEnabled_af then
+            autoRebirthRunLoop()
+        end
+    end)
+
+    -- cfg: Auto Rebirth toggle
+    V.cfgRead["auto_rebirth"] = function()
+        return {en = V.autoRebirthEnabled_af}
+    end
+    V.cfgApply["auto_rebirth"] = function(t)
+        local wantOn = (t.en == true)
+        if V.autoRebirthEnabled_af ~= wantOn then
+            V.autoRebirthEnabled_af = wantOn
+            updateArPill(V.autoRebirthEnabled_af)
+            if V.autoRebirthEnabled_af then
+                autoRebirthRunLoop()
+            end
+        end
+    end
 
     local function recalcTab3AFPositions()
         local tweenI = TweenInfo.new(0.2, Enum.EasingStyle.Quart)
