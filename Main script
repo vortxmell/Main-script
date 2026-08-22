@@ -9670,11 +9670,25 @@ do -- === AUTO FARM (scoped) ===
 
     -- Baca count.s2 GUI kalau kebetulan ada (self-heal opportunistic je,
     -- bukan dependency wajib).
+    -- FIX: bug "RB#10000 → requirement 66 (patut 36 utk RB#18)" — punca
+    -- ialah "(%d+)" generic terlalu longgar, boleh accidentally match
+    -- nombor lain dalam text label yg tak dijangka (bukan nombor rebirth
+    -- sebenar), corrupt V.rebirthCount_af terus dari seed pertama lagi
+    -- (self-heal pun tak boleh betulkan sebab baseline dah rosak sejak
+    -- awal). Fix: (a) target pattern lebih ketat "#<digit>" (format
+    -- sebenar UI "Rebirth #18"), (b) sanity bound — tolak terus kalau
+    -- angka tak masuk akal (>999, mustahil utk rebirth count realistik).
+    local REBIRTH_COUNT_SANE_MAX = 999
+
     local function rebirthReadCountFromGui()
         local ok, lbl = pcall(rebirthGetCountLabel)
         if not ok or not lbl then return nil end
-        local n = string.match(lbl.Text, "(%d+)")
-        return n and tonumber(n) or nil
+        local n = string.match(lbl.Text, "#%s*(%d+)") or string.match(lbl.Text, "(%d+)")
+        n = n and tonumber(n) or nil
+        if n and (n < 0 or n > REBIRTH_COUNT_SANE_MAX) then
+            return nil -- tolak bacaan tak masuk akal (cth 10000)
+        end
+        return n
     end
 
     -- Seed sekali masa script start.
@@ -9702,9 +9716,17 @@ do -- === AUTO FARM (scoped) ===
         -- Self-heal opportunistic: kalau GUI kebetulan terbuka, sync
         -- counter — cover kes rebirth berlaku di luar auto-loop kita
         -- (cth rebirth manual oleh user).
+        -- FIX: safety layer kedua — cuma terima bacaan GUI kalau beza
+        -- kecil dari counter sedia ada (bukan lonjakan besar mengarut).
+        -- Exception: kalau counter kita masih 0 (belum pernah seed
+        -- betul2), terima apa-apa bacaan sane (dah filter kat
+        -- rebirthReadCountFromGui) sebagai baseline pertama.
         local guiN = rebirthReadCountFromGui()
         if guiN and guiN ~= V.rebirthCount_af then
-            V.rebirthCount_af = guiN
+            local delta = math.abs(guiN - V.rebirthCount_af)
+            if V.rebirthCount_af == 0 or delta <= 3 then
+                V.rebirthCount_af = guiN
+            end
         end
         local cur = rebirthGetCurrentFloor()
         local req = rebirthGetRequirement()
