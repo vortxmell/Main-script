@@ -9936,6 +9936,17 @@ do -- === AUTO FARM (scoped) ===
         return result
     end
 
+    -- Detect rebirth baru berlaku (Auto Rebirth punya toggle, TAK diusik —
+    -- kita cuma BACA rebirthData.count dia). Naik berbanding check
+    -- sebelum ni = baru rebirth. Chicken level reset lepas rebirth, tapi
+    -- towerBest TAK reset, so frontier (towerBest+1) biasanya masih boleh
+    -- dilawan — fire terus, tak kira level, ikut request Mel.
+    local function atv2GetRebirthCount(mods)
+        local ok, result = pcall(function() return mods.DataController.rebirth().count end)
+        if not ok then return nil end
+        return result
+    end
+
     local function atv2GetFloorLevel(mods, floor)
         local ok, data = pcall(function() return mods.TowerFloor.at(floor) end)
         if ok and data then return data.level end
@@ -10001,12 +10012,20 @@ do -- === AUTO FARM (scoped) ===
     -- fallback trigger dah fire sekali (path "direct" pulak sengaja TAK
     -- dedup ikut level, sebab ia patut retry selagi target belum capai).
     local autoTowerV2LastFiredLevel = nil
+    local autoTowerV2LastRebirthCount = nil
 
     local function autoTowerV2RunLoop()
         if autoTowerV2LoopRunning then return end
         autoTowerV2LoopRunning = true
         task.spawn(function()
             autoTowerV2LastFiredLevel = atGetMyChickenLevel()
+            -- Seed baseline rebirth count SEBELUM loop start — elak toggle
+            -- ON ditafsir sebagai "baru rebirth" kalau rebirth berlaku lama
+            -- sebelum toggle dihidupkan.
+            do
+                local seedMods = atv2GetModules()
+                autoTowerV2LastRebirthCount = seedMods and atv2GetRebirthCount(seedMods) or nil
+            end
 
             while V.autoTowerV2Enabled_af do
                 local mods = atv2GetModules()
@@ -10017,8 +10036,30 @@ do -- === AUTO FARM (scoped) ===
                 else
                     local requirementFloor = atv2GetRequirementFloor(mods)
                     local towerBest = atv2GetTowerBest(mods)
+                    local rebirthCount = atv2GetRebirthCount(mods)
 
-                    if not requirementFloor or not towerBest then
+                    local justRebirthed = false
+                    if rebirthCount and autoTowerV2LastRebirthCount and rebirthCount > autoTowerV2LastRebirthCount then
+                        justRebirthed = true
+                    end
+                    if rebirthCount then
+                        autoTowerV2LastRebirthCount = rebirthCount
+                    end
+
+                    if not towerBest then
+                        task.wait(AT2_CHECK_INTERVAL)
+                    elseif justRebirthed then
+                        -- Baru rebirth — fire straight-to-frontier TERUS,
+                        -- tak kira level chicken/requirementFloor langsung.
+                        -- Lepas climb ni settle, loop balik ke logic biasa.
+                        local frontierFloor = towerBest + 1
+                        local fired = atv2FireStraightToFrontier(frontierFloor)
+                        if fired then
+                            atv2MonitorClimb(mods, requirementFloor or math.huge)
+                        else
+                            task.wait(AT2_CHECK_INTERVAL)
+                        end
+                    elseif not requirementFloor then
                         task.wait(AT2_CHECK_INTERVAL)
                     elseif towerBest >= requirementFloor then
                         -- Target dah capai (cth 40/40) — takde apa nak
