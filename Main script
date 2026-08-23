@@ -597,17 +597,17 @@ V.DROP_OPEN_H       = 139
 V.DROP_GAP          = 5
 V.MOV_DROP_OPEN_H   = 219   -- Movement: fly + ws + jumppower
 V.CAM_DROP_OPEN_H   = 140   -- Camera: freecam + spectate(+picker row) + freelook
-V.ANTI_DROP_OPEN_H  = 114   -- Anti/Protection: antiafk + antikick + antigameplaypaused
+V.ANTI_DROP_OPEN_H  = 85    -- Anti/Protection: antikick + antigameplaypaused (anti-afk dah dibuang)
 V.SERVER_DROP_OPEN_H= 195   -- Server/Networking: 4 buttons + jump-to-server section
 V.EMPTY_DROP_OPEN_H  = 122  -- Teleport/Position: copypos + input + tppos + waypoints
 V.PLAYER_DROP_OPEN_H = 184  -- Player: noclip + invisible + reset/respawn row + handlekill
 V.MISC_DROP_OPEN_H   = 122  -- Misc: freeze player + follow player (Wall Tools & Route Builder row dipindah keluar)
 V.TOOLS_DROP_OPEN_H  = 80   -- Tools: Wall Tools row + Platform Tools row
 -- Auto Farm tab constants (used in updateScrollState)
--- Farming dropdown: Auto Collect Scrap, Auto Rebirth, Auto Tower, Anti AFK.
+-- Farming dropdown: Auto Collect Scrap, Auto Rebirth, Auto Tower.
 -- (Auto Upgrade Coop/Feeder dipindah ke dropdown Upgrades berasingan.)
 V.AF_DROP_CLOSED_H = 24
-V.AF_DROP_OPEN_H   = 156
+V.AF_DROP_OPEN_H   = 130
 V.afDropOpen = false
 -- Upgrades dropdown: Auto Upgrade Coop + Auto Upgrade Feeder.
 V.UP_DROP_CLOSED_H = 24
@@ -8787,124 +8787,15 @@ end -- end TELEPORT/POSITION
 do -- === ANTI/PROTECTION (scoped) ===
 
     -- ════════════════════════════════════════════
-    -- ANTI AFK (y=27)
+    -- ANTI KICK (y=27)
     -- ════════════════════════════════════════════
-    local afkEnabled = false
-    local afkConn    = nil
-
-    local afkRow = Instance.new("Frame")
-    afkRow.Size               = UDim2.new(1, -8, 0, 22)
-    afkRow.Position           = UDim2.new(0, 4, 0, 27)
-    afkRow.BackgroundTransparency = 1
-    afkRow.BorderSizePixel    = 0
-    afkRow.Parent             = V.AntiWrapper
-
-    local afkLbl = Instance.new("TextLabel")
-    afkLbl.Size               = UDim2.new(0.55, 0, 1, 0)
-    afkLbl.BackgroundTransparency = 1
-    afkLbl.Text               = "Anti AFK"
-    afkLbl.TextColor3         = Color3.fromRGB(255, 255, 255)
-    afkLbl.TextSize           = 10
-    afkLbl.Font               = Enum.Font.Gotham
-    afkLbl.TextXAlignment     = Enum.TextXAlignment.Left
-    afkLbl.Parent             = afkRow
-
-    local afkStateText = Instance.new("TextLabel")
-    afkStateText.Size             = UDim2.new(0.18, 0, 1, 0)
-    afkStateText.Position         = UDim2.new(0.55, 0, 0, 0)
-    afkStateText.BackgroundTransparency = 1
-    afkStateText.Text             = "OFF"
-    afkStateText.TextColor3       = Color3.fromRGB(160, 160, 160)
-    afkStateText.TextSize         = 10
-    afkStateText.Font             = Enum.Font.GothamBold
-    afkStateText.TextXAlignment   = Enum.TextXAlignment.Right
-    afkStateText.Parent           = afkRow
-
-    local afkPillTrack = Instance.new("Frame")
-    afkPillTrack.Size             = UDim2.new(0, 34, 0, 16)
-    afkPillTrack.Position         = UDim2.new(1, -34, 0.5, -8)
-    afkPillTrack.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    afkPillTrack.BorderSizePixel  = 0
-    afkPillTrack.Parent           = afkRow
-    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = afkPillTrack end
-
-    local afkKnob = Instance.new("Frame")
-    afkKnob.Size             = UDim2.new(0, 12, 0, 12)
-    afkKnob.Position         = UDim2.new(0, 2, 0.5, -6)
-    afkKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-    afkKnob.BorderSizePixel  = 0
-    afkKnob.Parent           = afkPillTrack
-    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = afkKnob end
-
-    local afkToggleHitbox = Instance.new("TextButton")
-    afkToggleHitbox.Size               = UDim2.new(0, 34, 0, 16)
-    afkToggleHitbox.Position           = UDim2.new(1, -34, 0.5, -8)
-    afkToggleHitbox.BackgroundTransparency = 1
-    afkToggleHitbox.Text               = ""
-    afkToggleHitbox.Parent             = afkRow
-
-    local afkPillTween = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
-    local function updateAfkPill(on)
-        if on then
-            V.TweenService:Create(afkPillTrack, afkPillTween, {BackgroundColor3 = Color3.fromRGB(255,255,255)}):Play()
-            V.TweenService:Create(afkKnob, afkPillTween, {Position = UDim2.new(0,20,0.5,-6), BackgroundColor3 = Color3.fromRGB(0,0,0)}):Play()
-            afkStateText.Text = "ON";  afkStateText.TextColor3 = Color3.fromRGB(255,255,255)
-        else
-            V.TweenService:Create(afkPillTrack, afkPillTween, {BackgroundColor3 = Color3.fromRGB(60,60,60)}):Play()
-            V.TweenService:Create(afkKnob, afkPillTween, {Position = UDim2.new(0,2,0.5,-6), BackgroundColor3 = Color3.fromRGB(200,200,200)}):Play()
-            afkStateText.Text = "OFF"; afkStateText.TextColor3 = Color3.fromRGB(160,160,160)
-        end
-    end
-
-    afkToggleHitbox.MouseButton1Click:Connect(function()
-        afkEnabled = not afkEnabled
-        updateAfkPill(afkEnabled)
-        if afkEnabled then
-            -- IY ref: listen to Idled → VirtualUser CaptureController
-            afkConn = V.LocalPlayer.Idled:Connect(function()
-                pcall(function()
-                    local vu = game:GetService("VirtualUser")
-                    vu:CaptureController()
-                    vu:ClickButton2(Vector2.new())
-                end)
-            end)
-        else
-            if afkConn then afkConn:Disconnect(); afkConn = nil end
-        end
-    end)
-
-    -- DEFAULT ON: auto-enable Anti AFK on script execute
-    do
-        afkEnabled = true
-        updateAfkPill(true)
-        afkConn = V.LocalPlayer.Idled:Connect(function()
-            pcall(function()
-                local vu = game:GetService("VirtualUser")
-                vu:CaptureController()
-                vu:ClickButton2(Vector2.new())
-            end)
-        end)
-    end
-
-    -- ════════════════════════════════════════════
-    -- ANTI KICK (y=56)
-    -- ════════════════════════════════════════════
-    do
-        local div = Instance.new("Frame")
-        div.Size = UDim2.new(1, 0, 0, 1)
-        div.Position = UDim2.new(0, 0, 0, 52)
-        div.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        div.BackgroundTransparency = 0.85
-        div.BorderSizePixel = 0
-        div.Parent = V.AntiWrapper
-    end
 
     local akEnabled  = false
     local akHooked   = false  -- hookmetamethod can't be undone
 
     local akRow = Instance.new("Frame")
     akRow.Size               = UDim2.new(1, -8, 0, 22)
-    akRow.Position           = UDim2.new(0, 4, 0, 56)
+    akRow.Position           = UDim2.new(0, 4, 0, 27)
     akRow.BackgroundTransparency = 1
     akRow.BorderSizePixel    = 0
     akRow.Parent             = V.AntiWrapper
@@ -9021,12 +8912,12 @@ do -- === ANTI/PROTECTION (scoped) ===
     end
 
     -- ════════════════════════════════════════════
-    -- ANTI GAMEPLAY PAUSED (y=85)
+    -- ANTI GAMEPLAY PAUSED (y=56)
     -- ════════════════════════════════════════════
     do
         local div = Instance.new("Frame")
         div.Size = UDim2.new(1, 0, 0, 1)
-        div.Position = UDim2.new(0, 0, 0, 81)
+        div.Position = UDim2.new(0, 0, 0, 52)
         div.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         div.BackgroundTransparency = 0.85
         div.BorderSizePixel = 0
@@ -9038,7 +8929,7 @@ do -- === ANTI/PROTECTION (scoped) ===
 
     local agpRow = Instance.new("Frame")
     agpRow.Size               = UDim2.new(1, -8, 0, 22)
-    agpRow.Position           = UDim2.new(0, 4, 0, 85)
+    agpRow.Position           = UDim2.new(0, 4, 0, 56)
     agpRow.BackgroundTransparency = 1
     agpRow.BorderSizePixel    = 0
     agpRow.Parent             = V.AntiWrapper
@@ -9138,29 +9029,6 @@ do -- === ANTI/PROTECTION (scoped) ===
                 end
             end)
         end)
-    end
-
-    -- cfg: anti-afk
-    V.cfgRead["afk"] = function()
-        return {en=afkEnabled}
-    end
-    V.cfgApply["afk"] = function(t)
-        local wantOn = (t.en == true)
-        if afkEnabled ~= wantOn then
-            afkEnabled = wantOn
-            updateAfkPill(afkEnabled)
-            if afkEnabled then
-                if afkConn then afkConn:Disconnect() end
-                afkConn = V.LocalPlayer.Idled:Connect(function()
-                    pcall(function()
-                        local vu = game:GetService("VirtualUser")
-                        vu:CaptureController(); vu:ClickButton2(Vector2.new())
-                    end)
-                end)
-            else
-                if afkConn then afkConn:Disconnect(); afkConn = nil end
-            end
-        end
     end
 
     -- cfg: anti-kick
@@ -10003,177 +9871,6 @@ do -- === AUTO FARM (scoped) ===
             updateAtPill(V.autoTowerEnabled_af)
             if V.autoTowerEnabled_af then
                 autoTowerRunLoop()
-            end
-        end
-    end
-
-    -- ═══ Anti AFK ═════════════════════════════════════════════════
-    -- FIX: Roblox punya idle-kick (~20 minit) TAK detect based on
-    -- pergerakan character (CFrame/MoveTo) — ia monitor INPUT DEVICE
-    -- SEBENAR (mouse/key/touch) kat client engine. Random walk je tak
-    -- reset timer tu. Fix sebenar: guna VirtualUser (service RASMI
-    -- Roblox utk simulate input sebenar) + event LocalPlayer.Idled
-    -- (fire SEBELUM kick betul2 jadi) — inilah standard anti-idle
-    -- pattern utk Roblox. Random walk dikekalkan sekali (tak buang) —
-    -- boleh je berguna kalau game ada AFK-detection sendiri (custom,
-    -- based on posisi/aktiviti) berasingan dari Roblox punya idle-kick.
-    local ANTI_AFK_INTERVAL = 60 -- saat antara setiap random walk
-    local ANTI_AFK_DIST     = 3  -- studs
-
-    V.antiAfkEnabled_af = false
-    local antiAfkLoopRunning = false
-
-    local vuService = game:GetService("VirtualUser")
-    local afkIdledConn = nil
-
-    local function afkStartIdledHook()
-        if afkIdledConn then return end
-        afkIdledConn = V.LocalPlayer.Idled:Connect(function()
-            if not V.antiAfkEnabled_af then return end
-            pcall(function()
-                vuService:CaptureController()
-                vuService:ClickButton2(Vector2.new())
-            end)
-        end)
-    end
-
-    local function afkStopIdledHook()
-        if afkIdledConn then
-            afkIdledConn:Disconnect()
-            afkIdledConn = nil
-        end
-    end
-
-    local function afkGetChar()
-        local char = V.LocalPlayer.Character
-        if not char then return nil, nil, nil end
-        local hum  = char:FindFirstChildOfClass("Humanoid")
-        local root = char:FindFirstChild("HumanoidRootPart")
-        if not hum or not root then return nil, nil, nil end
-        return char, hum, root
-    end
-
-    -- Walk guna MoveTo — sama pattern Auto Collect Scrap (acsWalkTo),
-    -- respect toggle (stop serta-merta bila di-off).
-    local function afkWalkTo(hum, root, targetPos, timeout)
-        timeout = timeout or 5
-        hum:MoveTo(targetPos)
-        local reached = false
-        local conn
-        conn = hum.MoveToFinished:Connect(function() reached = true end)
-        local t0 = tick()
-        while V.antiAfkEnabled_af and not reached and (tick() - t0) < timeout do
-            task.wait(0.1)
-        end
-        if conn.Connected then conn:Disconnect() end
-    end
-
-    local function antiAfkRunLoop()
-        if antiAfkLoopRunning then return end
-        antiAfkLoopRunning = true
-        afkStartIdledHook()
-        task.spawn(function()
-            while V.antiAfkEnabled_af do
-                local char, hum, root = afkGetChar()
-                if root then
-                    local angle  = math.random() * math.pi * 2
-                    local offset = Vector3.new(math.cos(angle) * ANTI_AFK_DIST, 0, math.sin(angle) * ANTI_AFK_DIST)
-                    afkWalkTo(hum, root, root.Position + offset, 5)
-                end
-                local t0 = tick()
-                while V.antiAfkEnabled_af and (tick() - t0) < ANTI_AFK_INTERVAL do
-                    task.wait(0.5)
-                end
-            end
-            afkStopIdledHook()
-            antiAfkLoopRunning = false
-        end)
-    end
-
-    local afkRow = Instance.new("Frame")
-    afkRow.Size = UDim2.new(1, -8, 0, 22)
-    afkRow.Position = UDim2.new(0, 4, 0, 128)
-    afkRow.BackgroundTransparency = 1
-    afkRow.BorderSizePixel = 0
-    afkRow.Parent = V.afWrapper
-
-    local afkLbl = Instance.new("TextLabel")
-    afkLbl.Size = UDim2.new(0.55, 0, 1, 0)
-    afkLbl.BackgroundTransparency = 1
-    afkLbl.Text = "Anti AFK"
-    afkLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
-    afkLbl.TextSize = 10
-    afkLbl.Font = Enum.Font.Gotham
-    afkLbl.TextXAlignment = Enum.TextXAlignment.Left
-    afkLbl.Parent = afkRow
-
-    local afkStateText = Instance.new("TextLabel")
-    afkStateText.Size = UDim2.new(0.18, 0, 1, 0)
-    afkStateText.Position = UDim2.new(0.55, 0, 0, 0)
-    afkStateText.BackgroundTransparency = 1
-    afkStateText.Text = "OFF"
-    afkStateText.TextColor3 = Color3.fromRGB(160, 160, 160)
-    afkStateText.TextSize = 10
-    afkStateText.Font = Enum.Font.GothamBold
-    afkStateText.TextXAlignment = Enum.TextXAlignment.Right
-    afkStateText.Parent = afkRow
-
-    local afkPillTrack = Instance.new("Frame")
-    afkPillTrack.Size = UDim2.new(0, 34, 0, 16)
-    afkPillTrack.Position = UDim2.new(1, -34, 0.5, -8)
-    afkPillTrack.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    afkPillTrack.BorderSizePixel = 0
-    afkPillTrack.Parent = afkRow
-    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = afkPillTrack end
-
-    local afkKnob = Instance.new("Frame")
-    afkKnob.Size = UDim2.new(0, 12, 0, 12)
-    afkKnob.Position = UDim2.new(0, 2, 0.5, -6)
-    afkKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-    afkKnob.BorderSizePixel = 0
-    afkKnob.Parent = afkPillTrack
-    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = afkKnob end
-
-    local afkToggleHitbox = Instance.new("TextButton")
-    afkToggleHitbox.Size = UDim2.new(0, 34, 0, 16)
-    afkToggleHitbox.Position = UDim2.new(1, -34, 0.5, -8)
-    afkToggleHitbox.BackgroundTransparency = 1
-    afkToggleHitbox.Text = ""
-    afkToggleHitbox.Parent = afkRow
-
-    local afkPillTween = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
-
-    local function updateAfkPill(on)
-        if on then
-            V.TweenService:Create(afkPillTrack, afkPillTween, {BackgroundColor3 = Color3.fromRGB(255,255,255)}):Play()
-            V.TweenService:Create(afkKnob, afkPillTween, {Position = UDim2.new(0,20,0.5,-6), BackgroundColor3 = Color3.fromRGB(0,0,0)}):Play()
-            afkStateText.Text = "ON";  afkStateText.TextColor3 = Color3.fromRGB(255,255,255)
-        else
-            V.TweenService:Create(afkPillTrack, afkPillTween, {BackgroundColor3 = Color3.fromRGB(60,60,60)}):Play()
-            V.TweenService:Create(afkKnob, afkPillTween, {Position = UDim2.new(0,2,0.5,-6), BackgroundColor3 = Color3.fromRGB(200,200,200)}):Play()
-            afkStateText.Text = "OFF"; afkStateText.TextColor3 = Color3.fromRGB(160,160,160)
-        end
-    end
-
-    afkToggleHitbox.MouseButton1Click:Connect(function()
-        V.antiAfkEnabled_af = not V.antiAfkEnabled_af
-        updateAfkPill(V.antiAfkEnabled_af)
-        if V.antiAfkEnabled_af then
-            antiAfkRunLoop()
-        end
-    end)
-
-    -- cfg: Anti AFK toggle
-    V.cfgRead["anti_afk_walk"] = function()
-        return {en = V.antiAfkEnabled_af}
-    end
-    V.cfgApply["anti_afk_walk"] = function(t)
-        local wantOn = (t.en == true)
-        if V.antiAfkEnabled_af ~= wantOn then
-            V.antiAfkEnabled_af = wantOn
-            updateAfkPill(V.antiAfkEnabled_af)
-            if V.antiAfkEnabled_af then
-                antiAfkRunLoop()
             end
         end
     end
