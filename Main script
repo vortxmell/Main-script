@@ -10730,7 +10730,7 @@ do -- === AUTO FARM (scoped) ===
     -- sendiri guna (DataController/RebirthBonus/RebirthExperiment),
     -- sama teknik yg dah confirm jalan dlm Rebirth_info.lua.
     V.STATS_DROP_CLOSED_H = 24
-    V.STATS_DROP_OPEN_H   = 130
+    V.STATS_DROP_OPEN_H   = 150
 
     local statsWrapper = Instance.new("Frame")
     statsWrapper.Name = "StatsInfoDrop"
@@ -10787,6 +10787,7 @@ do -- === AUTO FARM (scoped) ===
         "Rebirth requirement floor",
         "Tower floor",
         "Ready to rebirth",
+        "Floor requirement level",
     }
     for i, name in ipairs(statNames) do
         local lbl = Instance.new("TextLabel")
@@ -10822,6 +10823,7 @@ do -- === AUTO FARM (scoped) ===
                     local DataController = require(V.LocalPlayer:WaitForChild("PlayerScripts").Core.Data.DataController)
                     local RebirthBonus = require(game:GetService("ReplicatedStorage").Core.Progression.RebirthBonus)
                     local RebirthExperiment = require(game:GetService("ReplicatedStorage").Core.Progression.RebirthExperiment)
+                    local TowerFloor = require(game:GetService("ReplicatedStorage").Features.Battle.tower.TowerFloor)
 
                     local rebirthData = DataController.rebirth()
                     local towerBest = DataController.towerBest()
@@ -10830,11 +10832,19 @@ do -- === AUTO FARM (scoped) ===
                     local requirementFloor = RebirthBonus.requirementFloorFor(rebirthData.count, isVariant)
                     local readyToRebirth = (towerBest >= requirementFloor)
 
+                    -- Floor requirement level — level chicken yg diperlukan
+                    -- utk lawan DI floor requirementFloor tu sendiri (cth
+                    -- requirementFloor=46 -> "Floor 46: chicken level 30").
+                    local reqFloorLevel = nil
+                    local okFl, flData = pcall(function() return TowerFloor.at(requirementFloor) end)
+                    if okFl and flData then reqFloorLevel = flData.level end
+
                     statLabels[1].Text = string.format("Rebirth tier: %s", tostring(rebirthData.count))
                     statLabels[2].Text = string.format("Tower best: %s", tostring(towerBest))
                     statLabels[3].Text = string.format("Rebirth requirement floor: %s", tostring(requirementFloor))
                     statLabels[4].Text = string.format("Tower floor: %s/%s", tostring(towerBest), tostring(requirementFloor))
                     statLabels[5].Text = string.format("Ready to rebirth: %s", tostring(readyToRebirth))
+                    statLabels[6].Text = string.format("Floor %s: chicken level %s", tostring(requirementFloor), tostring(reqFloorLevel))
                 end)
                 if not ok then
                     statLabels[1].Text = "Rebirth tier: (gagal baca)"
