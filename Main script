@@ -607,7 +607,7 @@ V.TOOLS_DROP_OPEN_H  = 80   -- Tools: Wall Tools row + Platform Tools row
 -- Farming dropdown: Auto Collect Scrap, Auto Rebirth, Auto Tower.
 -- (Auto Upgrade Coop/Feeder dipindah ke dropdown Upgrades berasingan.)
 V.AF_DROP_CLOSED_H = 24
-V.AF_DROP_OPEN_H   = 130
+V.AF_DROP_OPEN_H   = 180
 V.afDropOpen = false
 -- Upgrades dropdown: Auto Upgrade Coop + Auto Upgrade Feeder.
 V.UP_DROP_CLOSED_H = 24
@@ -9871,6 +9871,304 @@ do -- === AUTO FARM (scoped) ===
             updateAtPill(V.autoTowerEnabled_af)
             if V.autoTowerEnabled_af then
                 autoTowerRunLoop()
+            end
+        end
+    end
+
+    -- ═══ Auto Tower: Frontier (V2) ═══════════════════════════════════
+    -- Auto Tower LAMA (atas) TAK DISENTUH — logic dia jalan macam biasa
+    -- guna V.autoTowerEnabled_af. Feature ni toggle BERASINGAN, reuse
+    -- helper V1 (atGetMyChickenLevel/atGetSkipBtn/atFireDecline) sebagai
+    -- read-only sebab dah confirmed reliable, tapi kaedah "fire" dan
+    -- syarat "bila nak fire" sepenuhnya baru. Flow (per request Mel):
+    --   1. TowerFloor.at(floor).level = level chicken yg diperlukan utk
+    --      floor tu — module SEBENAR game (ReplicatedStorage.Features.
+    --      Battle.tower.TowerFloor), confirmed reliable via Floor_table.lua.
+    --   2. requirementFloor semasa = RebirthBonus.requirementFloorFor(...),
+    --      teknik SAMA yg Stats Info panel guna (di bawah).
+    --   3. Kalau chicken level >= level yg diperlukan utk requirementFloor
+    --      tu, TERUS fire straight-to-frontier (TowerElevator+TowerStart,
+    --      frontier = towerBest()+1) — tak payah tunggu tier 10/20/30 dulu.
+    --   4. Kalau chicken level MASIH bawah keperluan tu, fallback ke
+    --      trigger lama (level EXACT kena multiple of 10), tapi guna
+    --      KAEDAH FIRE straight-to-frontier yg SAMA (bukan TowerStart
+    --      terus macam V1, sebab TowerStart je start balik dari floor 1).
+    --   5. Semasa climb aktif, poll towerBest() tiap AT2_POLL_INTERVAL —
+    --      bila towerBest >= requirementFloor (cth 40/40, target dah
+    --      capai), terus fire TowerSurrender (retreat/bank progress,
+    --      elak risik chicken mati lepas target dah capai).
+    --   6. Kalau UI TowerContinue keluar SEBELUM target dicapai (chicken
+    --      kalah, cth kalah floor 20 sebelum sampai 40), fire decline
+    --      (skip) — REUSE atGetSkipBtn()/atFireDecline() dari V1 di atas,
+    --      logic sama yg dah confirmed jalan, tak ditulis semula.
+    local function atv2GetModules()
+        local ok, mods = pcall(function()
+            local DataController = require(V.LocalPlayer:WaitForChild("PlayerScripts").Core.Data.DataController)
+            local RS = game:GetService("ReplicatedStorage")
+            local RebirthBonus = require(RS.Core.Progression.RebirthBonus)
+            local RebirthExperiment = require(RS.Core.Progression.RebirthExperiment)
+            local TowerFloor = require(RS.Features.Battle.tower.TowerFloor)
+            return {
+                DataController = DataController,
+                RebirthBonus = RebirthBonus,
+                RebirthExperiment = RebirthExperiment,
+                TowerFloor = TowerFloor,
+            }
+        end)
+        if not ok then return nil end
+        return mods
+    end
+
+    local function atv2GetRequirementFloor(mods)
+        local ok, result = pcall(function()
+            local rebirthData = mods.DataController.rebirth()
+            local myArm = mods.RebirthExperiment.armOf(V.LocalPlayer)
+            local isVariant = (myArm == mods.RebirthExperiment.VARIANT)
+            return mods.RebirthBonus.requirementFloorFor(rebirthData.count, isVariant)
+        end)
+        if not ok then return nil end
+        return result
+    end
+
+    local function atv2GetTowerBest(mods)
+        local ok, result = pcall(function() return mods.DataController.towerBest() end)
+        if not ok then return nil end
+        return result
+    end
+
+    local function atv2GetFloorLevel(mods, floor)
+        local ok, data = pcall(function() return mods.TowerFloor.at(floor) end)
+        if ok and data then return data.level end
+        return nil
+    end
+
+    -- Straight to Frontier — floor DIBACA LIVE (frontier = towerBest()+1,
+    -- passed in), takde hardcode. Sama flow yg dah confirmed jalan.
+    local function atv2FireStraightToFrontier(frontierFloor)
+        local RS = game:GetService("ReplicatedStorage")
+        local Remotes = RS:WaitForChild("Remotes")
+        local elevatorEv = Remotes:WaitForChild("TowerElevator", 5)
+        local startEv = Remotes:WaitForChild("TowerStart", 5)
+        if not elevatorEv or not startEv then return false end
+
+        local ok1 = pcall(function() elevatorEv:InvokeServer(frontierFloor) end)
+        task.wait(1)
+        local ok2, result2 = pcall(function()
+            return table.pack(startEv:InvokeServer())
+        end)
+        if not ok1 or not ok2 then return false end
+        local r = result2[1]
+        return type(r) == "table" and r.ok == true
+    end
+
+    local function atv2FireSurrender()
+        pcall(function()
+            local Event = game:GetService("ReplicatedStorage").Remotes.TowerSurrender
+            Event:InvokeServer()
+        end)
+    end
+
+    local AT2_CHECK_INTERVAL = 2   -- saat antara check bila idle
+    local AT2_CLIMB_TIMEOUT  = 120 -- saat max tunggu climb settle
+    local AT2_POLL_INTERVAL  = 0.5 -- saat antara poll semasa climb aktif
+
+    -- Semasa climb aktif: poll towerBest (target capai -> surrender) ATAU
+    -- UI TowerContinue keluar (kalah -> decline, REUSE dari V1 di atas).
+    local function atv2MonitorClimb(mods, requirementFloor)
+        local giveUp = tick() + AT2_CLIMB_TIMEOUT
+        while V.autoTowerV2Enabled_af and tick() < giveUp do
+            if atGetSkipBtn() then
+                atFireDecline()
+                local giveUp2 = tick() + 5
+                while atGetSkipBtn() and tick() < giveUp2 do
+                    task.wait(AT2_POLL_INTERVAL)
+                end
+                return "lost"
+            end
+            local towerBestNow = atv2GetTowerBest(mods)
+            if towerBestNow and towerBestNow >= requirementFloor then
+                atv2FireSurrender()
+                return "retreated"
+            end
+            task.wait(AT2_POLL_INTERVAL)
+        end
+        return "timeout"
+    end
+
+    V.autoTowerV2Enabled_af = false
+    local autoTowerV2LoopRunning = false
+    -- Sama konsep dedup macam V1 — elak refire spam kat level SAMA lepas
+    -- fallback trigger dah fire sekali (path "direct" pulak sengaja TAK
+    -- dedup ikut level, sebab ia patut retry selagi target belum capai).
+    local autoTowerV2LastFiredLevel = nil
+
+    local function autoTowerV2RunLoop()
+        if autoTowerV2LoopRunning then return end
+        autoTowerV2LoopRunning = true
+        task.spawn(function()
+            autoTowerV2LastFiredLevel = atGetMyChickenLevel()
+
+            while V.autoTowerV2Enabled_af do
+                local mods = atv2GetModules()
+                local lvl = atGetMyChickenLevel()
+
+                if not mods or not lvl then
+                    task.wait(AT2_CHECK_INTERVAL)
+                else
+                    local requirementFloor = atv2GetRequirementFloor(mods)
+                    local towerBest = atv2GetTowerBest(mods)
+
+                    if not requirementFloor or not towerBest then
+                        task.wait(AT2_CHECK_INTERVAL)
+                    elseif towerBest >= requirementFloor then
+                        -- Target dah capai (cth 40/40) — takde apa nak
+                        -- climb lagi buat masa ni, tunggu je.
+                        task.wait(AT2_CHECK_INTERVAL)
+                    else
+                        local reqFloorLevel = atv2GetFloorLevel(mods, requirementFloor)
+                        local readyDirect = reqFloorLevel and lvl >= reqFloorLevel
+                        local readyLegacyTrigger = lvl > 0 and lvl % 10 == 0 and lvl ~= autoTowerV2LastFiredLevel
+
+                        if readyDirect or readyLegacyTrigger then
+                            local frontierFloor = towerBest + 1
+                            local fired = atv2FireStraightToFrontier(frontierFloor)
+                            if fired then
+                                autoTowerV2LastFiredLevel = lvl
+                                atv2MonitorClimb(mods, requirementFloor)
+                            else
+                                task.wait(AT2_CHECK_INTERVAL)
+                            end
+                        else
+                            task.wait(AT2_CHECK_INTERVAL)
+                        end
+                    end
+                end
+            end
+            autoTowerV2LoopRunning = false
+        end)
+    end
+
+    -- ── Auto Tower: Frontier status row (y=130) ─────────────────────
+    local atv2StatusRow = Instance.new("Frame")
+    atv2StatusRow.Size = UDim2.new(1, -8, 0, 16)
+    atv2StatusRow.Position = UDim2.new(0, 4, 0, 130)
+    atv2StatusRow.BackgroundTransparency = 1
+    atv2StatusRow.Parent = V.afWrapper
+
+    local atv2StatusLbl = Instance.new("TextLabel")
+    atv2StatusLbl.Size = UDim2.new(1, 0, 1, 0)
+    atv2StatusLbl.BackgroundTransparency = 1
+    atv2StatusLbl.Text = "Frontier: Lv -- (Req floor --)"
+    atv2StatusLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
+    atv2StatusLbl.TextSize = 9
+    atv2StatusLbl.Font = Enum.Font.Gotham
+    atv2StatusLbl.TextXAlignment = Enum.TextXAlignment.Left
+    atv2StatusLbl.Parent = atv2StatusRow
+
+    task.spawn(function()
+        while true do
+            task.wait(1)
+            local ok = pcall(function()
+                local mods = atv2GetModules()
+                local lvl = atGetMyChickenLevel()
+                if mods and lvl then
+                    local reqFloor = atv2GetRequirementFloor(mods)
+                    atv2StatusLbl.Text = string.format("Frontier: Lv %d (Req floor %s)", lvl, tostring(reqFloor))
+                else
+                    atv2StatusLbl.Text = "Frontier: Lv -- (Req floor --)"
+                end
+            end)
+            if not ok then
+                atv2StatusLbl.Text = "Frontier: Lv -- (Req floor --)"
+            end
+        end
+    end)
+
+    -- ── Auto Tower: Frontier toggle (y=150) ─────────────────────────
+    local atv2Row = Instance.new("Frame")
+    atv2Row.Size = UDim2.new(1, -8, 0, 22)
+    atv2Row.Position = UDim2.new(0, 4, 0, 150)
+    atv2Row.BackgroundTransparency = 1
+    atv2Row.BorderSizePixel = 0
+    atv2Row.Parent = V.afWrapper
+
+    local atv2Lbl = Instance.new("TextLabel")
+    atv2Lbl.Size = UDim2.new(0.55, 0, 1, 0)
+    atv2Lbl.BackgroundTransparency = 1
+    atv2Lbl.Text = "Auto Tower: Frontier"
+    atv2Lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    atv2Lbl.TextSize = 10
+    atv2Lbl.Font = Enum.Font.Gotham
+    atv2Lbl.TextXAlignment = Enum.TextXAlignment.Left
+    atv2Lbl.Parent = atv2Row
+
+    local atv2StateText = Instance.new("TextLabel")
+    atv2StateText.Size = UDim2.new(0.18, 0, 1, 0)
+    atv2StateText.Position = UDim2.new(0.55, 0, 0, 0)
+    atv2StateText.BackgroundTransparency = 1
+    atv2StateText.Text = "OFF"
+    atv2StateText.TextColor3 = Color3.fromRGB(160, 160, 160)
+    atv2StateText.TextSize = 10
+    atv2StateText.Font = Enum.Font.GothamBold
+    atv2StateText.TextXAlignment = Enum.TextXAlignment.Right
+    atv2StateText.Parent = atv2Row
+
+    local atv2PillTrack = Instance.new("Frame")
+    atv2PillTrack.Size = UDim2.new(0, 34, 0, 16)
+    atv2PillTrack.Position = UDim2.new(1, -34, 0.5, -8)
+    atv2PillTrack.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    atv2PillTrack.BorderSizePixel = 0
+    atv2PillTrack.Parent = atv2Row
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = atv2PillTrack end
+
+    local atv2Knob = Instance.new("Frame")
+    atv2Knob.Size = UDim2.new(0, 12, 0, 12)
+    atv2Knob.Position = UDim2.new(0, 2, 0.5, -6)
+    atv2Knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    atv2Knob.BorderSizePixel = 0
+    atv2Knob.Parent = atv2PillTrack
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = atv2Knob end
+
+    local atv2ToggleHitbox = Instance.new("TextButton")
+    atv2ToggleHitbox.Size = UDim2.new(0, 34, 0, 16)
+    atv2ToggleHitbox.Position = UDim2.new(1, -34, 0.5, -8)
+    atv2ToggleHitbox.BackgroundTransparency = 1
+    atv2ToggleHitbox.Text = ""
+    atv2ToggleHitbox.Parent = atv2Row
+
+    local atv2PillTween = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
+
+    local function updateAtv2Pill(on)
+        if on then
+            V.TweenService:Create(atv2PillTrack, atv2PillTween, {BackgroundColor3 = Color3.fromRGB(255,255,255)}):Play()
+            V.TweenService:Create(atv2Knob, atv2PillTween, {Position = UDim2.new(0,20,0.5,-6), BackgroundColor3 = Color3.fromRGB(0,0,0)}):Play()
+            atv2StateText.Text = "ON";  atv2StateText.TextColor3 = Color3.fromRGB(255,255,255)
+        else
+            V.TweenService:Create(atv2PillTrack, atv2PillTween, {BackgroundColor3 = Color3.fromRGB(60,60,60)}):Play()
+            V.TweenService:Create(atv2Knob, atv2PillTween, {Position = UDim2.new(0,2,0.5,-6), BackgroundColor3 = Color3.fromRGB(200,200,200)}):Play()
+            atv2StateText.Text = "OFF"; atv2StateText.TextColor3 = Color3.fromRGB(160,160,160)
+        end
+    end
+
+    atv2ToggleHitbox.MouseButton1Click:Connect(function()
+        V.autoTowerV2Enabled_af = not V.autoTowerV2Enabled_af
+        updateAtv2Pill(V.autoTowerV2Enabled_af)
+        if V.autoTowerV2Enabled_af then
+            autoTowerV2RunLoop()
+        end
+    end)
+
+    -- cfg: Auto Tower: Frontier toggle
+    V.cfgRead["auto_tower_frontier"] = function()
+        return {en = V.autoTowerV2Enabled_af}
+    end
+    V.cfgApply["auto_tower_frontier"] = function(t)
+        local wantOn = (t.en == true)
+        if V.autoTowerV2Enabled_af ~= wantOn then
+            V.autoTowerV2Enabled_af = wantOn
+            updateAtv2Pill(V.autoTowerV2Enabled_af)
+            if V.autoTowerV2Enabled_af then
+                autoTowerV2RunLoop()
             end
         end
     end
