@@ -10008,14 +10008,41 @@ do -- === AUTO FARM (scoped) ===
     end
 
     -- ═══ Anti AFK ═════════════════════════════════════════════════
-    -- Simple: random walk 3 studs dari posisi semasa, setiap interval
-    -- tertentu — guna Humanoid:MoveTo() SAMA pattern macam Auto Collect
-    -- Scrap punya walk method (acsWalkTo).
-    local ANTI_AFK_INTERVAL = 900 -- saat antara setiap random walk
+    -- FIX: Roblox punya idle-kick (~20 minit) TAK detect based on
+    -- pergerakan character (CFrame/MoveTo) — ia monitor INPUT DEVICE
+    -- SEBENAR (mouse/key/touch) kat client engine. Random walk je tak
+    -- reset timer tu. Fix sebenar: guna VirtualUser (service RASMI
+    -- Roblox utk simulate input sebenar) + event LocalPlayer.Idled
+    -- (fire SEBELUM kick betul2 jadi) — inilah standard anti-idle
+    -- pattern utk Roblox. Random walk dikekalkan sekali (tak buang) —
+    -- boleh je berguna kalau game ada AFK-detection sendiri (custom,
+    -- based on posisi/aktiviti) berasingan dari Roblox punya idle-kick.
+    local ANTI_AFK_INTERVAL = 60 -- saat antara setiap random walk
     local ANTI_AFK_DIST     = 3  -- studs
 
     V.antiAfkEnabled_af = false
     local antiAfkLoopRunning = false
+
+    local vuService = game:GetService("VirtualUser")
+    local afkIdledConn = nil
+
+    local function afkStartIdledHook()
+        if afkIdledConn then return end
+        afkIdledConn = V.LocalPlayer.Idled:Connect(function()
+            if not V.antiAfkEnabled_af then return end
+            pcall(function()
+                vuService:CaptureController()
+                vuService:ClickButton2(Vector2.new())
+            end)
+        end)
+    end
+
+    local function afkStopIdledHook()
+        if afkIdledConn then
+            afkIdledConn:Disconnect()
+            afkIdledConn = nil
+        end
+    end
 
     local function afkGetChar()
         local char = V.LocalPlayer.Character
@@ -10044,6 +10071,7 @@ do -- === AUTO FARM (scoped) ===
     local function antiAfkRunLoop()
         if antiAfkLoopRunning then return end
         antiAfkLoopRunning = true
+        afkStartIdledHook()
         task.spawn(function()
             while V.antiAfkEnabled_af do
                 local char, hum, root = afkGetChar()
@@ -10057,6 +10085,7 @@ do -- === AUTO FARM (scoped) ===
                     task.wait(0.5)
                 end
             end
+            afkStopIdledHook()
             antiAfkLoopRunning = false
         end)
     end
