@@ -10425,6 +10425,128 @@ do -- === AUTO FARM (scoped) ===
     end)
 
     end -- end Upgrades dropdown
+
+    do -- === Stats Info dropdown (ContentPanelRight, Auto Farm tab) ===
+    -- Live stats: Rebirth Tier, Tower best, Rebirth requirement floor,
+    -- Tower floor, Ready to rebirth — guna module sama yg game punya UI
+    -- sendiri guna (DataController/RebirthBonus/RebirthExperiment),
+    -- sama teknik yg dah confirm jalan dlm Rebirth_info.lua.
+    V.STATS_DROP_CLOSED_H = 24
+    V.STATS_DROP_OPEN_H   = 130
+
+    local statsWrapper = Instance.new("Frame")
+    statsWrapper.Name = "StatsInfoDrop"
+    statsWrapper.Size = UDim2.new(1, -10, 0, V.STATS_DROP_CLOSED_H)
+    statsWrapper.Position = UDim2.new(0, 5, 0, 5)
+    statsWrapper.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    statsWrapper.BorderSizePixel = 0
+    statsWrapper.ClipsDescendants = true
+    statsWrapper.Parent = V.ContentPanelRight
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0,4); c.Parent = statsWrapper end
+
+    -- Hook ke V.LiveInfoPanel — visibility toggle Auto Farm tab (line
+    -- ~750) dah check `if V.LiveInfoPanel then .Visible = isAutoFarm`,
+    -- jadi assign terus supaya auto show/hide ikut tab tanpa edit lain.
+    V.LiveInfoPanel = statsWrapper
+
+    local statsHeader = Instance.new("TextButton")
+    statsHeader.Size = UDim2.new(1, 0, 0, 24)
+    statsHeader.BackgroundTransparency = 1
+    statsHeader.BorderSizePixel = 0
+    statsHeader.Text = "Stats Info"
+    statsHeader.TextColor3 = Color3.fromRGB(255, 255, 255)
+    statsHeader.TextSize = 10
+    statsHeader.Font = Enum.Font.GothamBold
+    statsHeader.TextXAlignment = Enum.TextXAlignment.Left
+    statsHeader.Parent = statsWrapper
+    do local p = Instance.new("UIPadding"); p.PaddingLeft = UDim.new(0,8); p.Parent = statsHeader end
+
+    local statsArrow = Instance.new("TextLabel")
+    statsArrow.Size = UDim2.new(1, -8, 0, 24)
+    statsArrow.BackgroundTransparency = 1
+    statsArrow.Text = "▶"
+    statsArrow.TextColor3 = Color3.fromRGB(255, 255, 255)
+    statsArrow.TextSize = 10
+    statsArrow.Font = Enum.Font.GothamBold
+    statsArrow.TextXAlignment = Enum.TextXAlignment.Right
+    statsArrow.ZIndex = 2
+    statsArrow.Parent = statsWrapper
+
+    do
+        local div = Instance.new("Frame")
+        div.Size = UDim2.new(1, 0, 0, 1)
+        div.Position = UDim2.new(0, 0, 0, 24)
+        div.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        div.BackgroundTransparency = 0.8
+        div.BorderSizePixel = 0
+        div.Parent = statsWrapper
+    end
+
+    local statLabels = {}
+    local statNames = {
+        "Rebirth tier",
+        "Tower best",
+        "Rebirth requirement floor",
+        "Tower floor",
+        "Ready to rebirth",
+    }
+    for i, name in ipairs(statNames) do
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1, -16, 0, 20)
+        lbl.Position = UDim2.new(0, 8, 0, 27 + (i - 1) * 20)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = name .. ": ..."
+        lbl.TextColor3 = Color3.fromRGB(200, 200, 200)
+        lbl.TextSize = 9
+        lbl.Font = Enum.Font.Gotham
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.Parent = statsWrapper
+        statLabels[i] = lbl
+    end
+
+    V.statsDropOpen = false
+    statsHeader.MouseButton1Click:Connect(function()
+        V.statsDropOpen = not V.statsDropOpen
+        statsArrow.Text = V.statsDropOpen and "▼" or "▶"
+        local h = V.statsDropOpen and V.STATS_DROP_OPEN_H or V.STATS_DROP_CLOSED_H
+        V.TweenService:Create(statsWrapper, TweenInfo.new(0.2, Enum.EasingStyle.Quart), {
+            Size = UDim2.new(1, -10, 0, h)
+        }):Play()
+    end)
+
+    -- ── Live refresh loop — update setiap 1 saat selagi tab Auto Farm
+    -- visible & dropdown terbuka (jimat resource bila tak nampak pun).
+    task.spawn(function()
+        while true do
+            task.wait(1)
+            if statsWrapper.Visible and V.statsDropOpen then
+                local ok = pcall(function()
+                    local DataController = require(V.LocalPlayer:WaitForChild("PlayerScripts").Core.Data.DataController)
+                    local RebirthBonus = require(game:GetService("ReplicatedStorage").Core.Progression.RebirthBonus)
+                    local RebirthExperiment = require(game:GetService("ReplicatedStorage").Core.Progression.RebirthExperiment)
+
+                    local rebirthData = DataController.rebirth()
+                    local towerBest = DataController.towerBest()
+                    local myArm = RebirthExperiment.armOf(V.LocalPlayer)
+                    local isVariant = (myArm == RebirthExperiment.VARIANT)
+                    local requirementFloor = RebirthBonus.requirementFloorFor(rebirthData.count, isVariant)
+                    local readyToRebirth = (towerBest >= requirementFloor)
+
+                    statLabels[1].Text = string.format("Rebirth tier: %s", tostring(rebirthData.count))
+                    statLabels[2].Text = string.format("Tower best: %s", tostring(towerBest))
+                    statLabels[3].Text = string.format("Rebirth requirement floor: %s", tostring(requirementFloor))
+                    statLabels[4].Text = string.format("Tower floor: %s/%s", tostring(towerBest), tostring(requirementFloor))
+                    statLabels[5].Text = string.format("Ready to rebirth: %s", tostring(readyToRebirth))
+                end)
+                if not ok then
+                    statLabels[1].Text = "Rebirth tier: (gagal baca)"
+                end
+            end
+        end
+    end)
+
+    end -- end Stats Info dropdown
+
 end -- end AUTO FARM
 
 -- ========================
