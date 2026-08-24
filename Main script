@@ -9908,11 +9908,13 @@ do -- === AUTO FARM (scoped) ===
             local RebirthBonus = require(RS.Core.Progression.RebirthBonus)
             local RebirthExperiment = require(RS.Core.Progression.RebirthExperiment)
             local TowerFloor = require(RS.Features.Battle.tower.TowerFloor)
+            local ChickenTypes = require(RS.Content.Catalog.ChickenTypes)
             return {
                 DataController = DataController,
                 RebirthBonus = RebirthBonus,
                 RebirthExperiment = RebirthExperiment,
                 TowerFloor = TowerFloor,
+                ChickenTypes = ChickenTypes,
             }
         end)
         if not ok then return nil end
@@ -9951,6 +9953,50 @@ do -- === AUTO FARM (scoped) ===
         local ok, data = pcall(function() return mods.TowerFloor.at(floor) end)
         if ok and data then return data.level end
         return nil
+    end
+
+    -- ── Rarity gate (per request Mel: "level je tak cukup") ──────────
+    -- Confirmed via dump: ChickenTypes[typeId].rarity wujud untuk semua
+    -- typeId (rare/epic/legendary/mythic/cosmic/ascendant). "direct fire"
+    -- sekarang check BUKAN je level, tapi jugak rarity chicken aku vs
+    -- rarity opponent floor tu — elak fire ke floor yg confirm kalah
+    -- walaupun level dah cukup (punca kekalahan Lv.55 vs Lv.55 sebelum ni).
+    local RARITY_RANK = {
+        common = 1, uncommon = 2, rare = 3, epic = 4,
+        legendary = 5, mythic = 6, cosmic = 7, ascendant = 8,
+    }
+
+    local function atv2GetFloorTypeId(mods, floor)
+        local ok, data = pcall(function() return mods.TowerFloor.at(floor) end)
+        if ok and data then return data.typeId end
+        return nil
+    end
+
+    local function atv2GetRarityOf(mods, typeId)
+        if not typeId then return nil end
+        local ok, entry = pcall(function() return mods.ChickenTypes[typeId] end)
+        if ok and entry then return entry.rarity end
+        return nil
+    end
+
+    -- Chicken player SENDIRI: baca typeId dari live instance
+    -- workspace.ChickenBodies.ChickenBody_coop:<plot>, attribute ovNameKey
+    -- (cth "chicken.sovereign_rooster.name" -> parse "sovereign_rooster").
+    -- Confirmed struktur ni via dump sebelum ni.
+    local function atv2GetMyChickenTypeId()
+        local ok, typeId = pcall(function()
+            local bodies = workspace:FindFirstChild("ChickenBodies")
+            if not bodies then return nil end
+            local plot = V.LocalPlayer:GetAttribute("Plot")
+            if not plot then return nil end
+            local myBody = bodies:FindFirstChild("ChickenBody_coop:" .. tostring(plot))
+            if not myBody then return nil end
+            local nameKey = myBody:GetAttribute("ovNameKey")
+            if not nameKey then return nil end
+            return nameKey:match("^chicken%.(.+)%.name$")
+        end)
+        if not ok then return nil end
+        return typeId
     end
 
     -- Straight to Frontier — floor DIBACA LIVE (frontier = towerBest()+1,
@@ -10067,10 +10113,26 @@ do -- === AUTO FARM (scoped) ===
                         task.wait(AT2_CHECK_INTERVAL)
                     else
                         local reqFloorLevel = atv2GetFloorLevel(mods, requirementFloor)
+                        local floorTypeId = atv2GetFloorTypeId(mods, requirementFloor)
+                        local floorRarity = atv2GetRarityOf(mods, floorTypeId)
+                        local myTypeId = atv2GetMyChickenTypeId()
+                        local myRarity = atv2GetRarityOf(mods, myTypeId)
+
+                        local floorRarityRank = floorRarity and RARITY_RANK[floorRarity]
+                        local myRarityRank = myRarity and RARITY_RANK[myRarity]
+                        -- Kalau salah satu rarity tak dapat dibaca (nil),
+                        -- jangan block terus — anggap "unknown" sebagai
+                        -- lulus (fallback ke level-only) supaya feature
+                        -- tak diam bisu bila struktur data berubah.
+                        local rarityOk = (not floorRarityRank) or (not myRarityRank) or (myRarityRank >= floorRarityRank)
+
                         local readyDirect = reqFloorLevel and lvl >= reqFloorLevel
                         local readyLegacyTrigger = lvl > 0 and lvl % 10 == 0 and lvl ~= autoTowerV2LastFiredLevel
 
-                        if readyDirect or readyLegacyTrigger then
+                        -- Rarity gate berkuatkuasa utk KEDUA-DUA path — fire
+                        -- ke floor yg rarity confirm lebih tinggi tetap
+                        -- kalah walau level dah cukup/multiple of 10.
+                        if (readyDirect or readyLegacyTrigger) and rarityOk then
                             local frontierFloor = towerBest + 1
                             local fired = atv2FireStraightToFrontier(frontierFloor)
                             if fired then
@@ -10114,7 +10176,15 @@ do -- === AUTO FARM (scoped) ===
                 local lvl = atGetMyChickenLevel()
                 if mods and lvl then
                     local reqFloor = atv2GetRequirementFloor(mods)
-                    atv2StatusLbl.Text = string.format("Frontier: Lv %d (Req floor %s)", lvl, tostring(reqFloor))
+                    local myTypeId = atv2GetMyChickenTypeId()
+                    local myRarity = atv2GetRarityOf(mods, myTypeId) or "?"
+                    local floorRarity = "?"
+                    if reqFloor then
+                        local floorTypeId = atv2GetFloorTypeId(mods, reqFloor)
+                        floorRarity = atv2GetRarityOf(mods, floorTypeId) or "?"
+                    end
+                    atv2StatusLbl.Text = string.format("Frontier: Lv %d [%s] (Req floor %s [%s])",
+                        lvl, myRarity, tostring(reqFloor), floorRarity)
                 else
                     atv2StatusLbl.Text = "Frontier: Lv -- (Req floor --)"
                 end
