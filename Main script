@@ -10246,12 +10246,31 @@ do -- === AUTO FARM (scoped) ===
         return mods
     end
 
+    -- CONFIRMED via standalone test (banding terus dengan UI Collection):
+    -- DataController.chicken() TAK reliable/correct — punca asal auto-tower
+    -- v3 bagi nombor salah (15.7M/1.53M padahal UI tunjuk 7.8M/982.5K).
+    -- Fix: guna DataController.roster().chickens[activeId] — confirmed
+    -- 100% match dengan UI (sama exact source yang Collection UI guna
+    -- untuk papar checkmark "ACTIVE"). TowerFloor.multsFor (formula
+    -- battle-specific) KEKAL macam asal — cuma "chicken mana" yang dibaca
+    -- yang kita fix, bukan formula pengiraan tower punya.
     local function atv3GetMyChickenData()
         local ok, mods = pcall(atv2GetModules)
         if not ok or not mods then return nil end
-        local ok2, data = pcall(function() return mods.DataController.chicken() end)
-        if not ok2 or not data then return nil end
-        return data
+        local ok2, roster = pcall(function() return mods.DataController.roster() end)
+        if not ok2 or not roster or type(roster.chickens) ~= "table" then return nil end
+
+        local activeId = roster.activeId
+        local chicken = roster.chickens[activeId]
+        if not chicken then
+            for _, c in roster.chickens do
+                if type(c) == "table" and c.id == activeId then
+                    chicken = c
+                    break
+                end
+            end
+        end
+        return chicken
     end
 
     local function atv3ComputeStats(mods3, typeId, rarity, level)
