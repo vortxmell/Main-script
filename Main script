@@ -10908,28 +10908,12 @@ do -- === AUTO FARM (scoped) ===
                         end
                     end
 
-                    -- Phase B: UPGRADE FEEDER — LEVEL EQUALIZE (bukan round-robin
-                    -- ikut posisi lagi). Cari level PALING RENDAH antara semua
-                    -- feeder yg belum maxed, upgrade HANYA feeder(s) pada level
-                    -- tu. Bila dah sama level dgn tier seterusnya, tick
-                    -- seterusnya akan re-scan & candidate set naik sekali.
-                    -- Cth: [5,5,5,4,4,1] -> upgrade feeder lvl1 je sampai jadi
-                    -- 4, lepas tu [5,5,5,4,4,4] -> upgrade ketiga2 lvl4 sekali
-                    -- sampai jadi 5, lepas tu semua sama & naik bersama.
+                    -- Phase B: UPGRADE FEEDER — FIRE SEMUA SERENTAK (bukan
+                    -- equalize level lagi). Setiap feeder yg mampu di-upgrade,
+                    -- terus fire — tak kisah level tertinggal/lebih tinggi
+                    -- dari feeder lain.
                     local list = findAllFeederUpgradeParts()
                     if #list == 0 then
-                        return
-                    end
-
-                    local minLevel = nil
-                    for _, e in ipairs(list) do
-                        if e.level then
-                            if not minLevel or e.level < minLevel then
-                                minLevel = e.level
-                            end
-                        end
-                    end
-                    if not minLevel then
                         return
                     end
 
@@ -10944,21 +10928,19 @@ do -- === AUTO FARM (scoped) ===
                     end
 
                     for _, entry in ipairs(list) do
-                        if entry.level == minLevel then
-                            local cost = parseCostText(entry.belowLbl and entry.belowLbl.Text)
-                            if cost and money and money >= cost then
-                                fireproximityprompt(entry.prompt)
-                                -- tolak anggaran baki utk elak overspend kalau
-                                -- ada >1 feeder pada min level yg sama dlm cycle ni.
-                                money = money - cost
-                            end
+                        local cost = parseCostText(entry.belowLbl and entry.belowLbl.Text)
+                        if cost and money and money >= cost then
+                            fireproximityprompt(entry.prompt)
+                            -- tolak anggaran baki utk elak overspend kalau
+                            -- ada >1 feeder mampu di-upgrade dlm cycle yg sama.
+                            money = money - cost
                         end
                     end
                 end)
                 if not ok then
                     print("[AutoUpgradeFeeder][ERROR] " .. tostring(err))
                 end
-                task.wait(0.1)
+                task.wait(0)
             end
             autoUpgradeFeederLoopRunning = false
         end)
