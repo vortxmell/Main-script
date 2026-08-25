@@ -10286,6 +10286,53 @@ do -- === AUTO FARM (scoped) ===
 
     local AT3_CHECK_INTERVAL = 2 -- saat antara check bila idle
 
+    -- Live current floor semasa battle aktif — leaderstats.Tower.Value
+    -- (confirmed reliable, update LIVE masa climb, bukan tunggu floor
+    -- settle/bank macam towerBest() dari DataController yang boleh lambat
+    -- sikit nak update).
+    local function atv3GetLiveTowerFloor()
+        local ok, val = pcall(function()
+            local ls = V.LocalPlayer:FindFirstChild("leaderstats")
+            local towerStat = ls and ls:FindFirstChild("Tower")
+            return towerStat and towerStat.Value
+        end)
+        if ok then return val end
+        return nil
+    end
+
+    -- Monitor climb V3 — sama base dgn atv2MonitorClimb, tapi TAMBAH check
+    -- live leaderstats.Tower (contoh "tower floor: 51/51") sebagai trigger
+    -- retreat TAMBAHAN — lebih responsive berbanding towerBest() sahaja.
+    -- V2 punya atv2MonitorClimb TAK disentuh (dah confirmed jalan elok).
+    local function atv3MonitorClimb(mods2, requirementFloor)
+        local giveUp = tick() + AT2_CLIMB_TIMEOUT
+        while V.autoTowerV3Enabled_af and tick() < giveUp do
+            if atGetSkipBtn() then
+                atFireDecline()
+                local giveUp2 = tick() + 5
+                while atGetSkipBtn() and tick() < giveUp2 do
+                    task.wait(AT2_POLL_INTERVAL)
+                end
+                return "lost"
+            end
+
+            local liveFloor = atv3GetLiveTowerFloor()
+            if liveFloor and liveFloor >= requirementFloor then
+                atv2FireSurrender()
+                return "retreated"
+            end
+
+            local towerBestNow = atv2GetTowerBest(mods2)
+            if towerBestNow and towerBestNow >= requirementFloor then
+                atv2FireSurrender()
+                return "retreated"
+            end
+
+            task.wait(AT2_POLL_INTERVAL)
+        end
+        return "timeout"
+    end
+
     V.autoTowerV3Enabled_af = false
     local autoTowerV3LoopRunning = false
 
@@ -10314,7 +10361,7 @@ do -- === AUTO FARM (scoped) ===
                             local frontierFloor = towerBest + 1
                             local fired = atv2FireStraightToFrontier(frontierFloor)
                             if fired then
-                                atv2MonitorClimb(mods2, requirementFloor)
+                                atv3MonitorClimb(mods2, requirementFloor)
                             else
                                 task.wait(AT3_CHECK_INTERVAL)
                             end
