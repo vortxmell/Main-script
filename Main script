@@ -10958,7 +10958,7 @@ do -- === AUTO FARM (scoped) ===
                 if not ok then
                     print("[AutoUpgradeFeeder][ERROR] " .. tostring(err))
                 end
-                task.wait(1)
+                task.wait(0.1)
             end
             autoUpgradeFeederLoopRunning = false
         end)
