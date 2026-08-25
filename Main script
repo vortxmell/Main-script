@@ -607,7 +607,7 @@ V.TOOLS_DROP_OPEN_H  = 80   -- Tools: Wall Tools row + Platform Tools row
 -- Farming dropdown: Auto Collect Scrap, Auto Rebirth, Auto Tower.
 -- (Auto Upgrade Coop/Feeder dipindah ke dropdown Upgrades berasingan.)
 V.AF_DROP_CLOSED_H = 24
-V.AF_DROP_OPEN_H   = 180
+V.AF_DROP_OPEN_H   = 224
 V.afDropOpen = false
 -- Upgrades dropdown: Auto Upgrade Coop + Auto Upgrade Feeder.
 V.UP_DROP_CLOSED_H = 24
@@ -9908,13 +9908,11 @@ do -- === AUTO FARM (scoped) ===
             local RebirthBonus = require(RS.Core.Progression.RebirthBonus)
             local RebirthExperiment = require(RS.Core.Progression.RebirthExperiment)
             local TowerFloor = require(RS.Features.Battle.tower.TowerFloor)
-            local ChickenTypes = require(RS.Content.Catalog.ChickenTypes)
             return {
                 DataController = DataController,
                 RebirthBonus = RebirthBonus,
                 RebirthExperiment = RebirthExperiment,
                 TowerFloor = TowerFloor,
-                ChickenTypes = ChickenTypes,
             }
         end)
         if not ok then return nil end
@@ -9953,50 +9951,6 @@ do -- === AUTO FARM (scoped) ===
         local ok, data = pcall(function() return mods.TowerFloor.at(floor) end)
         if ok and data then return data.level end
         return nil
-    end
-
-    -- ── Rarity gate (per request Mel: "level je tak cukup") ──────────
-    -- Confirmed via dump: ChickenTypes[typeId].rarity wujud untuk semua
-    -- typeId (rare/epic/legendary/mythic/cosmic/ascendant). "direct fire"
-    -- sekarang check BUKAN je level, tapi jugak rarity chicken aku vs
-    -- rarity opponent floor tu — elak fire ke floor yg confirm kalah
-    -- walaupun level dah cukup (punca kekalahan Lv.55 vs Lv.55 sebelum ni).
-    local RARITY_RANK = {
-        common = 1, uncommon = 2, rare = 3, epic = 4,
-        legendary = 5, mythic = 6, cosmic = 7, ascendant = 8,
-    }
-
-    local function atv2GetFloorTypeId(mods, floor)
-        local ok, data = pcall(function() return mods.TowerFloor.at(floor) end)
-        if ok and data then return data.typeId end
-        return nil
-    end
-
-    local function atv2GetRarityOf(mods, typeId)
-        if not typeId then return nil end
-        local ok, entry = pcall(function() return mods.ChickenTypes[typeId] end)
-        if ok and entry then return entry.rarity end
-        return nil
-    end
-
-    -- Chicken player SENDIRI: baca typeId dari live instance
-    -- workspace.ChickenBodies.ChickenBody_coop:<plot>, attribute ovNameKey
-    -- (cth "chicken.sovereign_rooster.name" -> parse "sovereign_rooster").
-    -- Confirmed struktur ni via dump sebelum ni.
-    local function atv2GetMyChickenTypeId()
-        local ok, typeId = pcall(function()
-            local bodies = workspace:FindFirstChild("ChickenBodies")
-            if not bodies then return nil end
-            local plot = V.LocalPlayer:GetAttribute("Plot")
-            if not plot then return nil end
-            local myBody = bodies:FindFirstChild("ChickenBody_coop:" .. tostring(plot))
-            if not myBody then return nil end
-            local nameKey = myBody:GetAttribute("ovNameKey")
-            if not nameKey then return nil end
-            return nameKey:match("^chicken%.(.+)%.name$")
-        end)
-        if not ok then return nil end
-        return typeId
     end
 
     -- Straight to Frontier — floor DIBACA LIVE (frontier = towerBest()+1,
@@ -10113,26 +10067,10 @@ do -- === AUTO FARM (scoped) ===
                         task.wait(AT2_CHECK_INTERVAL)
                     else
                         local reqFloorLevel = atv2GetFloorLevel(mods, requirementFloor)
-                        local floorTypeId = atv2GetFloorTypeId(mods, requirementFloor)
-                        local floorRarity = atv2GetRarityOf(mods, floorTypeId)
-                        local myTypeId = atv2GetMyChickenTypeId()
-                        local myRarity = atv2GetRarityOf(mods, myTypeId)
-
-                        local floorRarityRank = floorRarity and RARITY_RANK[floorRarity]
-                        local myRarityRank = myRarity and RARITY_RANK[myRarity]
-                        -- Kalau salah satu rarity tak dapat dibaca (nil),
-                        -- jangan block terus — anggap "unknown" sebagai
-                        -- lulus (fallback ke level-only) supaya feature
-                        -- tak diam bisu bila struktur data berubah.
-                        local rarityOk = (not floorRarityRank) or (not myRarityRank) or (myRarityRank >= floorRarityRank)
-
                         local readyDirect = reqFloorLevel and lvl >= reqFloorLevel
                         local readyLegacyTrigger = lvl > 0 and lvl % 10 == 0 and lvl ~= autoTowerV2LastFiredLevel
 
-                        -- Rarity gate berkuatkuasa utk KEDUA-DUA path — fire
-                        -- ke floor yg rarity confirm lebih tinggi tetap
-                        -- kalah walau level dah cukup/multiple of 10.
-                        if (readyDirect or readyLegacyTrigger) and rarityOk then
+                        if readyDirect or readyLegacyTrigger then
                             local frontierFloor = towerBest + 1
                             local fired = atv2FireStraightToFrontier(frontierFloor)
                             if fired then
@@ -10176,15 +10114,7 @@ do -- === AUTO FARM (scoped) ===
                 local lvl = atGetMyChickenLevel()
                 if mods and lvl then
                     local reqFloor = atv2GetRequirementFloor(mods)
-                    local myTypeId = atv2GetMyChickenTypeId()
-                    local myRarity = atv2GetRarityOf(mods, myTypeId) or "?"
-                    local floorRarity = "?"
-                    if reqFloor then
-                        local floorTypeId = atv2GetFloorTypeId(mods, reqFloor)
-                        floorRarity = atv2GetRarityOf(mods, floorTypeId) or "?"
-                    end
-                    atv2StatusLbl.Text = string.format("Frontier: Lv %d [%s] (Req floor %s [%s])",
-                        lvl, myRarity, tostring(reqFloor), floorRarity)
+                    atv2StatusLbl.Text = string.format("Frontier: Lv %d (Req floor %s)", lvl, tostring(reqFloor))
                 else
                     atv2StatusLbl.Text = "Frontier: Lv -- (Req floor --)"
                 end
@@ -10280,6 +10210,260 @@ do -- === AUTO FARM (scoped) ===
             updateAtv2Pill(V.autoTowerV2Enabled_af)
             if V.autoTowerV2Enabled_af then
                 autoTowerV2RunLoop()
+            end
+        end
+    end
+
+    -- ═══ Auto Tower: Stats (V3) ═══════════════════════════════════════
+    -- Auto Tower V1/V2 (atas) TAK DISENTUH. Toggle BERASINGAN ketiga.
+    -- Flow (step 1 sahaja per request, test dulu sebelum next step):
+    --   1. Compute stats CHICKEN SENDIRI (hp/damage) guna formula SEBENAR
+    --      game — TowerFloor.multsFor(typeId, rarity) + Curve.at() +
+    --      GameConfig.chicken.base/growth — SAMA formula yg
+    --      TowerFloor.previewStats() guna utk rival (apple-to-apple).
+    --      typeId/rarity/level dibaca LIVE dari DataController.chicken()
+    --      setiap kali check — TAK hardcode, ikut chicken yg deployed
+    --      sekarang (boleh tukar bila-bila).
+    --      CONFIRMED: ovHpText/ovDmgText (billboard display text) TAK
+    --      reliable (kadang nil, bergantung billboard tengah render on-
+    --      screen ke tak) — sebab tu compute terus dari formula, bukan
+    --      scrape display text.
+    --   2. Rival stats kat requirement floor semasa: TowerFloor.previewStats().
+    --   3. Kalau my hp >= rival hp DAN my damage >= rival damage — TERUS
+    --      fire straight-to-frontier (reuse atv2FireStraightToFrontier +
+    --      atv2MonitorClimb dari V2 — mekanisme fire/monitor SAMA, cuma
+    --      SYARAT bila nak fire yang beza).
+    local function atv3GetModules()
+        local ok, mods = pcall(function()
+            local RS = game:GetService("ReplicatedStorage")
+            return {
+                TowerFloor = require(RS.Features.Battle.tower.TowerFloor),
+                GameConfig = require(RS.Content.GameConfig),
+                Curve      = require(RS.Core.Progression.Curve),
+            }
+        end)
+        if not ok then return nil end
+        return mods
+    end
+
+    local function atv3GetMyChickenData()
+        local ok, mods = pcall(atv2GetModules)
+        if not ok or not mods then return nil end
+        local ok2, data = pcall(function() return mods.DataController.chicken() end)
+        if not ok2 or not data then return nil end
+        return data
+    end
+
+    local function atv3ComputeStats(mods3, typeId, rarity, level)
+        local ok, hp, dmg = pcall(function()
+            local chicken = mods3.GameConfig.chicken
+            local archetype, rarityMult = mods3.TowerFloor.multsFor(typeId, rarity)
+            local hpVal = math.floor(
+                mods3.Curve.at({base = chicken.base.hp, growth = chicken.growth.hp}, level - 1)
+                * archetype.hp * rarityMult + 0.5)
+            local dmgVal = math.floor(
+                mods3.Curve.at({base = chicken.base.atk, growth = chicken.growth.atk}, level - 1)
+                * archetype.atk * rarityMult + 0.5)
+            return hpVal, dmgVal
+        end)
+        if not ok then return nil, nil end
+        return hp, dmg
+    end
+
+    -- Pulangkan: canBeat (bool|nil), myHp, myDmg, rivalHp, rivalDmg
+    local function atv3CanBeatFloor(mods2, mods3, requirementFloor)
+        local chickenData = atv3GetMyChickenData()
+        if not chickenData then return nil end
+        local myHp, myDmg = atv3ComputeStats(mods3, chickenData.typeId, chickenData.rarity, chickenData.level)
+        if not myHp or not myDmg then return nil end
+
+        local ok, rivalStats = pcall(function() return mods2.TowerFloor.previewStats(requirementFloor) end)
+        if not ok or not rivalStats then return nil end
+
+        local canBeat = (myHp >= rivalStats.hp) and (myDmg >= rivalStats.damage)
+        return canBeat, myHp, myDmg, rivalStats.hp, rivalStats.damage
+    end
+
+    local AT3_CHECK_INTERVAL = 2 -- saat antara check bila idle
+
+    V.autoTowerV3Enabled_af = false
+    local autoTowerV3LoopRunning = false
+
+    local function autoTowerV3RunLoop()
+        if autoTowerV3LoopRunning then return end
+        autoTowerV3LoopRunning = true
+        task.spawn(function()
+            while V.autoTowerV3Enabled_af do
+                local mods2 = atv2GetModules()
+                local mods3 = atv3GetModules()
+
+                if not mods2 or not mods3 then
+                    task.wait(AT3_CHECK_INTERVAL)
+                else
+                    local requirementFloor = atv2GetRequirementFloor(mods2)
+                    local towerBest = atv2GetTowerBest(mods2)
+
+                    if not requirementFloor or not towerBest then
+                        task.wait(AT3_CHECK_INTERVAL)
+                    elseif towerBest >= requirementFloor then
+                        -- Target dah capai, takde apa nak climb lagi buat masa ni.
+                        task.wait(AT3_CHECK_INTERVAL)
+                    else
+                        local canBeat = atv3CanBeatFloor(mods2, mods3, requirementFloor)
+                        if canBeat then
+                            local frontierFloor = towerBest + 1
+                            local fired = atv2FireStraightToFrontier(frontierFloor)
+                            if fired then
+                                atv2MonitorClimb(mods2, requirementFloor)
+                            else
+                                task.wait(AT3_CHECK_INTERVAL)
+                            end
+                        else
+                            task.wait(AT3_CHECK_INTERVAL)
+                        end
+                    end
+                end
+            end
+            autoTowerV3LoopRunning = false
+        end)
+    end
+
+    -- ── Auto Tower: Stats status row (y=172) ─────────────────────────
+    local atv3StatusRow = Instance.new("Frame")
+    atv3StatusRow.Size = UDim2.new(1, -8, 0, 16)
+    atv3StatusRow.Position = UDim2.new(0, 4, 0, 172)
+    atv3StatusRow.BackgroundTransparency = 1
+    atv3StatusRow.Parent = V.afWrapper
+
+    local atv3StatusLbl = Instance.new("TextLabel")
+    atv3StatusLbl.Size = UDim2.new(1, 0, 1, 0)
+    atv3StatusLbl.BackgroundTransparency = 1
+    atv3StatusLbl.Text = "Stats: my --/-- vs rival --/--"
+    atv3StatusLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
+    atv3StatusLbl.TextSize = 9
+    atv3StatusLbl.Font = Enum.Font.Gotham
+    atv3StatusLbl.TextXAlignment = Enum.TextXAlignment.Left
+    atv3StatusLbl.Parent = atv3StatusRow
+
+    task.spawn(function()
+        while true do
+            task.wait(1)
+            local ok = pcall(function()
+                local mods2 = atv2GetModules()
+                local mods3 = atv3GetModules()
+                if mods2 and mods3 then
+                    local requirementFloor = atv2GetRequirementFloor(mods2)
+                    if requirementFloor then
+                        local canBeat, myHp, myDmg, rivalHp, rivalDmg =
+                            atv3CanBeatFloor(mods2, mods3, requirementFloor)
+                        if myHp then
+                            atv3StatusLbl.Text = string.format(
+                                "Stats: my %d/%d vs rival %d/%d",
+                                myHp, myDmg, rivalHp, rivalDmg)
+                            atv3StatusLbl.TextColor3 = canBeat
+                                and Color3.fromRGB(120, 255, 120)
+                                or  Color3.fromRGB(200, 200, 200)
+                        else
+                            atv3StatusLbl.Text = "Stats: my --/-- vs rival --/--"
+                        end
+                    else
+                        atv3StatusLbl.Text = "Stats: my --/-- vs rival --/--"
+                    end
+                else
+                    atv3StatusLbl.Text = "Stats: my --/-- vs rival --/--"
+                end
+            end)
+            if not ok then
+                atv3StatusLbl.Text = "Stats: my --/-- vs rival --/--"
+            end
+        end
+    end)
+
+    -- ── Auto Tower: Stats toggle (y=192) ─────────────────────────────
+    local atv3Row = Instance.new("Frame")
+    atv3Row.Size = UDim2.new(1, -8, 0, 22)
+    atv3Row.Position = UDim2.new(0, 4, 0, 192)
+    atv3Row.BackgroundTransparency = 1
+    atv3Row.BorderSizePixel = 0
+    atv3Row.Parent = V.afWrapper
+
+    local atv3Lbl = Instance.new("TextLabel")
+    atv3Lbl.Size = UDim2.new(0.55, 0, 1, 0)
+    atv3Lbl.BackgroundTransparency = 1
+    atv3Lbl.Text = "Auto Tower: Stats"
+    atv3Lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    atv3Lbl.TextSize = 10
+    atv3Lbl.Font = Enum.Font.Gotham
+    atv3Lbl.TextXAlignment = Enum.TextXAlignment.Left
+    atv3Lbl.Parent = atv3Row
+
+    local atv3StateText = Instance.new("TextLabel")
+    atv3StateText.Size = UDim2.new(0.18, 0, 1, 0)
+    atv3StateText.Position = UDim2.new(0.55, 0, 0, 0)
+    atv3StateText.BackgroundTransparency = 1
+    atv3StateText.Text = "OFF"
+    atv3StateText.TextColor3 = Color3.fromRGB(160, 160, 160)
+    atv3StateText.TextSize = 10
+    atv3StateText.Font = Enum.Font.GothamBold
+    atv3StateText.TextXAlignment = Enum.TextXAlignment.Right
+    atv3StateText.Parent = atv3Row
+
+    local atv3PillTrack = Instance.new("Frame")
+    atv3PillTrack.Size = UDim2.new(0, 34, 0, 16)
+    atv3PillTrack.Position = UDim2.new(1, -34, 0.5, -8)
+    atv3PillTrack.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    atv3PillTrack.BorderSizePixel = 0
+    atv3PillTrack.Parent = atv3Row
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = atv3PillTrack end
+
+    local atv3Knob = Instance.new("Frame")
+    atv3Knob.Size = UDim2.new(0, 12, 0, 12)
+    atv3Knob.Position = UDim2.new(0, 2, 0.5, -6)
+    atv3Knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    atv3Knob.BorderSizePixel = 0
+    atv3Knob.Parent = atv3PillTrack
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = atv3Knob end
+
+    local atv3ToggleHitbox = Instance.new("TextButton")
+    atv3ToggleHitbox.Size = UDim2.new(0, 34, 0, 16)
+    atv3ToggleHitbox.Position = UDim2.new(1, -34, 0.5, -8)
+    atv3ToggleHitbox.BackgroundTransparency = 1
+    atv3ToggleHitbox.Text = ""
+    atv3ToggleHitbox.Parent = atv3Row
+
+    local atv3PillTween = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
+
+    local function updateAtv3Pill(on)
+        if on then
+            V.TweenService:Create(atv3PillTrack, atv3PillTween, {BackgroundColor3 = Color3.fromRGB(255,255,255)}):Play()
+            V.TweenService:Create(atv3Knob, atv3PillTween, {Position = UDim2.new(0,20,0.5,-6), BackgroundColor3 = Color3.fromRGB(0,0,0)}):Play()
+            atv3StateText.Text = "ON";  atv3StateText.TextColor3 = Color3.fromRGB(255,255,255)
+        else
+            V.TweenService:Create(atv3PillTrack, atv3PillTween, {BackgroundColor3 = Color3.fromRGB(60,60,60)}):Play()
+            V.TweenService:Create(atv3Knob, atv3PillTween, {Position = UDim2.new(0,2,0.5,-6), BackgroundColor3 = Color3.fromRGB(200,200,200)}):Play()
+            atv3StateText.Text = "OFF"; atv3StateText.TextColor3 = Color3.fromRGB(160,160,160)
+        end
+    end
+
+    atv3ToggleHitbox.MouseButton1Click:Connect(function()
+        V.autoTowerV3Enabled_af = not V.autoTowerV3Enabled_af
+        updateAtv3Pill(V.autoTowerV3Enabled_af)
+        if V.autoTowerV3Enabled_af then
+            autoTowerV3RunLoop()
+        end
+    end)
+
+    -- cfg: Auto Tower: Stats toggle
+    V.cfgRead["auto_tower_stats"] = function()
+        return {en = V.autoTowerV3Enabled_af}
+    end
+    V.cfgApply["auto_tower_stats"] = function(t)
+        local wantOn = (t.en == true)
+        if V.autoTowerV3Enabled_af ~= wantOn then
+            V.autoTowerV3Enabled_af = wantOn
+            updateAtv3Pill(V.autoTowerV3Enabled_af)
+            if V.autoTowerV3Enabled_af then
+                autoTowerV3RunLoop()
             end
         end
     end
