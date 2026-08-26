@@ -9829,6 +9829,7 @@ do -- === AUTO FARM (scoped) ===
             return mods2.Ladder.byIndex(requirementFloor)
         end)
         if debugPrint then
+            print(("[atv3Debug] Ladder.count=%s (floor MAKSIMUM yang wujud buat masa ni)"):format(tostring(mods2.Ladder.count)))
             print(("[atv3Debug] Ladder.byIndex(%s) ok=%s stage=%s"):format(
                 tostring(requirementFloor), tostring(okLadder), tostring(stage)))
             if okLadder and stage then
@@ -9925,11 +9926,25 @@ do -- === AUTO FARM (scoped) ===
                 else
                     local requirementFloor = atv2GetRequirementFloor(mods2)
                     local towerBest = atv2GetTowerBest(mods2)
+                    local ladderCount = mods2.Ladder and mods2.Ladder.count
+
+                    -- Target sebenar tak boleh lebih dari Ladder.count (floor
+                    -- MAKSIMUM yg wujud dalam content semasa). Kalau
+                    -- requirementFloor (gate rebirth) lebih tinggi dari
+                    -- Ladder.count, tower content tu sendiri belum sampai
+                    -- situ — climb lagi jauh mustahil sampai developer tambah
+                    -- floor baru. Clamp supaya loop stop bila dah capai
+                    -- ceiling sebenar, bukan retry gagal berulang-ulang.
+                    local effectiveTarget = requirementFloor
+                    if ladderCount and requirementFloor and ladderCount < requirementFloor then
+                        effectiveTarget = ladderCount
+                    end
 
                     if not requirementFloor or not towerBest then
                         task.wait(AT3_CHECK_INTERVAL)
-                    elseif towerBest >= requirementFloor then
-                        -- Target (gate rebirth) dah capai, takde apa nak climb lagi buat masa ni.
+                    elseif towerBest >= effectiveTarget then
+                        -- Target (gate rebirth, atau ceiling Ladder.count kalau
+                        -- content belum sampai situ) dah capai.
                         task.wait(AT3_CHECK_INTERVAL)
                     else
                         -- PENTING: compare stats terhadap frontierFloor (floor
