@@ -10216,84 +10216,62 @@ do -- === AUTO FARM (scoped) ===
 
     -- ═══ Auto Tower: Stats (V3) ═══════════════════════════════════════
     -- Auto Tower V1/V2 (atas) TAK DISENTUH. Toggle BERASINGAN ketiga.
-    -- Flow (step 1 sahaja per request, test dulu sebelum next step):
-    --   1. Compute stats CHICKEN SENDIRI (hp/damage) guna formula SEBENAR
-    --      game — TowerFloor.multsFor(typeId, rarity) + Curve.at() +
-    --      GameConfig.chicken.base/growth — SAMA formula yg
-    --      TowerFloor.previewStats() guna utk rival (apple-to-apple).
-    --      typeId/rarity/level dibaca LIVE dari DataController.chicken()
-    --      setiap kali check — TAK hardcode, ikut chicken yg deployed
-    --      sekarang (boleh tukar bila-bila).
-    --      CONFIRMED: ovHpText/ovDmgText (billboard display text) TAK
-    --      reliable (kadang nil, bergantung billboard tengah render on-
-    --      screen ke tak) — sebab tu compute terus dari formula, bukan
-    --      scrape display text.
-    --   2. Rival stats kat requirement floor semasa: TowerFloor.previewStats().
-    --   3. Kalau my hp >= rival hp DAN my damage >= rival damage — TERUS
-    --      fire straight-to-frontier (reuse atv2FireStraightToFrontier +
-    --      atv2MonitorClimb dari V2 — mekanisme fire/monitor SAMA, cuma
-    --      SYARAT bila nak fire yang beza).
-    local function atv3GetModules()
-        local ok, mods = pcall(function()
-            local RS = game:GetService("ReplicatedStorage")
-            return {
-                TowerFloor = require(RS.Features.Battle.tower.TowerFloor),
-                GameConfig = require(RS.Content.GameConfig),
-                Curve      = require(RS.Core.Progression.Curve),
-            }
-        end)
-        if not ok then return nil end
-        return mods
+    -- REVISI: formula pengiraan (Catalog/TowerFloor.multsFor + Curve) dah
+    -- cuba 2x, dua-dua still tak match value sebenar (test standalone
+    -- confirmed match dengan Collection UI, tapi bila reuse dalam Auto
+    -- Tower masih silap — kemungkinan TowerFloor punya formula battle
+    -- lain dari cosmetic display, atau ada faktor lain yg kita tak nampak).
+    -- Approach baru: skip formula sepenuhnya — baca terus text LIVE dari
+    -- billboard atas chicken body (confirmed sama value yg UI Collection
+    -- papar, real-time, tak payah kira apa-apa). Reuse pattern sama
+    -- persis macam atGetMyChickenLevel() (coop:<plot> lookup) yg dah
+    -- proven reliable.
+    --   Path: workspace.ChickenBodies["ChickenBody_coop:<plot>"]
+    --         .BillboardGui.Frame.canvas.text.stats.row.hp / .sword
+    local function atv3ParseAbbrevText(text)
+        if type(text) ~= "string" then return nil end
+        local numPart, suffix = text:match("([%d%.]+)%s*(%a*)")
+        if not numPart then return nil end
+        local n = tonumber(numPart)
+        if not n then return nil end
+        local mult = {
+            ["K"] = 1e3,  ["M"] = 1e6,  ["B"] = 1e9,  ["T"] = 1e12,
+            ["QA"] = 1e15, ["QI"] = 1e18, ["SX"] = 1e21, ["SP"] = 1e24,
+            ["OC"] = 1e27, ["NO"] = 1e30, ["DC"] = 1e33,
+        }
+        local factor = 1
+        if suffix and suffix ~= "" then
+            factor = mult[suffix:upper()] or 1
+        end
+        return n * factor
     end
 
-    -- CONFIRMED via standalone test (banding terus dengan UI Collection):
-    -- DataController.chicken() TAK reliable/correct — punca asal auto-tower
-    -- v3 bagi nombor salah (15.7M/1.53M padahal UI tunjuk 7.8M/982.5K).
-    -- Fix: guna DataController.roster().chickens[activeId] — confirmed
-    -- 100% match dengan UI (sama exact source yang Collection UI guna
-    -- untuk papar checkmark "ACTIVE"). TowerFloor.multsFor (formula
-    -- battle-specific) KEKAL macam asal — cuma "chicken mana" yang dibaca
-    -- yang kita fix, bukan formula pengiraan tower punya.
-    local function atv3GetMyChickenData()
-        local ok, mods = pcall(atv2GetModules)
-        if not ok or not mods then return nil end
-        local ok2, roster = pcall(function() return mods.DataController.roster() end)
-        if not ok2 or not roster or type(roster.chickens) ~= "table" then return nil end
-
-        local activeId = roster.activeId
-        local chicken = roster.chickens[activeId]
-        if not chicken then
-            for _, c in roster.chickens do
-                if type(c) == "table" and c.id == activeId then
-                    chicken = c
-                    break
+    -- Reuse atGetMyCoop() (dah wujud atas, dari Auto Tower V1) untuk cari
+    -- plot/ChickenBody yg sama — elak duplicate logic pencarian coop.
+    local function atv3GetMyLiveStats()
+        local _, plot = atGetMyCoop()
+        if not plot then return nil, nil end
+        local bodies = workspace:FindFirstChild("ChickenBodies")
+        if not bodies then return nil, nil end
+        for _, body in ipairs(bodies:GetChildren()) do
+            if body.Name:find("coop:" .. tostring(plot), 1, true) then
+                local hpNode  = atSafeNavigate(body, "BillboardGui", "Frame", "canvas", "text", "stats", "row", "hp")
+                local atkNode = atSafeNavigate(body, "BillboardGui", "Frame", "canvas", "text", "stats", "row", "sword")
+                local hpText  = hpNode  and hpNode:IsA("TextLabel") and hpNode.Text or nil
+                local atkText = atkNode and atkNode:IsA("TextLabel") and atkNode.Text or nil
+                local hp  = atv3ParseAbbrevText(hpText)
+                local atk = atv3ParseAbbrevText(atkText)
+                if hp and atk then
+                    return hp, atk
                 end
             end
         end
-        return chicken
-    end
-
-    local function atv3ComputeStats(mods3, typeId, rarity, level)
-        local ok, hp, dmg = pcall(function()
-            local chicken = mods3.GameConfig.chicken
-            local archetype, rarityMult = mods3.TowerFloor.multsFor(typeId, rarity)
-            local hpVal = math.floor(
-                mods3.Curve.at({base = chicken.base.hp, growth = chicken.growth.hp}, level - 1)
-                * archetype.hp * rarityMult + 0.5)
-            local dmgVal = math.floor(
-                mods3.Curve.at({base = chicken.base.atk, growth = chicken.growth.atk}, level - 1)
-                * archetype.atk * rarityMult + 0.5)
-            return hpVal, dmgVal
-        end)
-        if not ok then return nil, nil end
-        return hp, dmg
+        return nil, nil
     end
 
     -- Pulangkan: canBeat (bool|nil), myHp, myDmg, rivalHp, rivalDmg
-    local function atv3CanBeatFloor(mods2, mods3, requirementFloor)
-        local chickenData = atv3GetMyChickenData()
-        if not chickenData then return nil end
-        local myHp, myDmg = atv3ComputeStats(mods3, chickenData.typeId, chickenData.rarity, chickenData.level)
+    local function atv3CanBeatFloor(mods2, requirementFloor)
+        local myHp, myDmg = atv3GetMyLiveStats()
         if not myHp or not myDmg then return nil end
 
         local ok, rivalStats = pcall(function() return mods2.TowerFloor.previewStats(requirementFloor) end)
@@ -10361,9 +10339,8 @@ do -- === AUTO FARM (scoped) ===
         task.spawn(function()
             while V.autoTowerV3Enabled_af do
                 local mods2 = atv2GetModules()
-                local mods3 = atv3GetModules()
 
-                if not mods2 or not mods3 then
+                if not mods2 then
                     task.wait(AT3_CHECK_INTERVAL)
                 else
                     local requirementFloor = atv2GetRequirementFloor(mods2)
@@ -10375,7 +10352,7 @@ do -- === AUTO FARM (scoped) ===
                         -- Target dah capai, takde apa nak climb lagi buat masa ni.
                         task.wait(AT3_CHECK_INTERVAL)
                     else
-                        local canBeat = atv3CanBeatFloor(mods2, mods3, requirementFloor)
+                        local canBeat = atv3CanBeatFloor(mods2, requirementFloor)
                         if canBeat then
                             local frontierFloor = towerBest + 1
                             local fired = atv2FireStraightToFrontier(frontierFloor)
@@ -10416,12 +10393,11 @@ do -- === AUTO FARM (scoped) ===
             task.wait(1)
             local ok = pcall(function()
                 local mods2 = atv2GetModules()
-                local mods3 = atv3GetModules()
-                if mods2 and mods3 then
+                if mods2 then
                     local requirementFloor = atv2GetRequirementFloor(mods2)
                     if requirementFloor then
                         local canBeat, myHp, myDmg, rivalHp, rivalDmg =
-                            atv3CanBeatFloor(mods2, mods3, requirementFloor)
+                            atv3CanBeatFloor(mods2, requirementFloor)
                         if myHp then
                             atv3StatusLbl.Text = string.format(
                                 "Stats: my %d/%d vs rival %d/%d",
