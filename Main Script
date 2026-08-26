@@ -10296,7 +10296,7 @@ do -- === AUTO FARM (scoped) ===
     -- Margin buffer supaya stats kita perlu LEBIH dari rival (bukan
     -- sekadar sama/≥), elak fire terus ke frontier walaupun stats tepat-
     -- tepat sama je dengan rival (risiko kalah sikit sebab rounding/lag).
-    local AT3_STAT_MARGIN = 1.10 -- 10% margin
+    local AT3_STAT_MARGIN = 1.20 -- 20% margin
 
     -- Pulangkan: canBeat (bool|nil), myHp, myDmg, rivalHp, rivalDmg
     local function atv3CanBeatFloor(mods2, requirementFloor, debugPrint)
