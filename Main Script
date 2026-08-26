@@ -611,7 +611,7 @@ V.AF_DROP_OPEN_H   = 130
 V.afDropOpen = false
 -- Upgrades dropdown: Auto Upgrade Coop + Auto Upgrade Feeder.
 V.UP_DROP_CLOSED_H = 24
-V.UP_DROP_OPEN_H   = 84
+V.UP_DROP_OPEN_H   = 110
 V.upDropOpen = false
 -- Auto Farm UI handles (forward declare; assigned inside AUTO FARM block)
 -- ========================
@@ -10550,6 +10550,204 @@ do -- === AUTO FARM (scoped) ===
             updateAufPill(V.autoUpgradeFeederEnabled_af)
             if V.autoUpgradeFeederEnabled_af then
                 autoUpgradeFeederRunLoop()
+            end
+        end
+    end
+
+
+    -- ═══ Auto Upgrade Recycler (dropdown Upgrades, y=82) ═══════════════
+    -- Guna module ASAL game terus (confirmed dari dump
+    -- RecyclerController/RecyclerView/RecyclerLevels) — TAK perlu baca
+    -- GUI/ProximityPrompt sebab data & action sebenar semua boleh
+    -- dipanggil terus:
+    --   - Level, Tower best, Rebirth count, Money: DataService.client:get(...)
+    --     + DataController.money() — SAMA data yg RecyclerController.recyclerView()
+    --     guna dalaman (tak perlu UI dibuka / GetChildren() index yg boleh berubah).
+    --   - Requirement floor & cost: RecyclerView.gateFloor(level) /
+    --     RecyclerView.upgradeCost(level) — formula & table ASAL game
+    --     (RecyclerLevels), bukan kira/teka sendiri.
+    --   - Action upgrade: ReplicatedStorage.Remotes.UpgradeRecycler:InvokeServer()
+    --     — confirmed dari RecyclerController.upgrade(). LEBIH RELIABLE
+    --     drpd fireproximityprompt sebab tak bergantung ProximityPrompt
+    --     instance/UI 3D dimount dalam jarak — remote terus, macam
+    --     Rebirth/RequestCheckpointTp dll yg dah confirmed berkesan.
+    local ReplicatedStorage_ur = game:GetService("ReplicatedStorage")
+    local DataService_ur = nil
+    local RecyclerView_ur = nil
+    local DataController_ur = nil
+    local UpgradeRecyclerRemote_ur = nil
+
+    local function ensureRecyclerModules()
+        if not DataService_ur then
+            local ok, mod = pcall(function()
+                return require(ReplicatedStorage_ur.Packages.DataService).client
+            end)
+            if ok then DataService_ur = mod end
+        end
+        if not RecyclerView_ur then
+            local ok, mod = pcall(function()
+                return require(ReplicatedStorage_ur.Features.Scrap.RecyclerView)
+            end)
+            if ok then RecyclerView_ur = mod end
+        end
+        if not DataController_ur then
+            local ok, mod = pcall(function()
+                return require(V.LocalPlayer:WaitForChild("PlayerScripts").Core.Data.DataController)
+            end)
+            if ok then DataController_ur = mod end
+        end
+        if not UpgradeRecyclerRemote_ur then
+            local ok, remote = pcall(function()
+                return ReplicatedStorage_ur:WaitForChild("Remotes", 5):WaitForChild("UpgradeRecycler", 5)
+            end)
+            if ok then UpgradeRecyclerRemote_ur = remote end
+        end
+        return DataService_ur and RecyclerView_ur and DataController_ur and UpgradeRecyclerRemote_ur
+    end
+
+    local function getRecyclerSnapshot()
+        local scrapData = DataService_ur:get({"scrap"})
+        local level = (scrapData and scrapData.recyclerLevel) or 0
+
+        local towerData = DataService_ur:get({"tower"})
+        local towerBest = (towerData and towerData.best) or 0
+
+        local rebirthData = DataService_ur:get({"rebirth"})
+        local rebirthCount
+        if type(rebirthData) == "table" then
+            rebirthCount = rebirthData.count or 0
+        elseif type(rebirthData) == "number" then
+            rebirthCount = rebirthData
+        else
+            rebirthCount = 0
+        end
+
+        local moneyOk, money = pcall(function()
+            return DataController_ur.money():toNumber()
+        end)
+        if not moneyOk then money = 0 end
+
+        return {
+            level        = level,
+            towerBest    = towerBest,
+            rebirthCount = rebirthCount,
+            money        = money,
+            upgradeCost  = RecyclerView_ur.upgradeCost(level),
+            canUpgrade   = RecyclerView_ur.canUpgrade(level, rebirthCount),
+            floorReq     = RecyclerView_ur.gateFloor(level),
+            floorLocked  = not RecyclerView_ur.floorUnlocked(level, towerBest),
+            busy         = V.LocalPlayer:GetAttribute(RecyclerView_ur.BusyAttr) == true,
+            locked       = V.LocalPlayer:GetAttribute(RecyclerView_ur.LockedAttr) == true,
+        }
+    end
+
+    V.autoUpgradeRecyclerEnabled_af = false
+    local autoUpgradeRecyclerLoopRunning = false
+
+    local function autoUpgradeRecyclerRunLoop()
+        if autoUpgradeRecyclerLoopRunning then return end
+        autoUpgradeRecyclerLoopRunning = true
+        task.spawn(function()
+            while V.autoUpgradeRecyclerEnabled_af do
+                pcall(function()
+                    if not ensureRecyclerModules() then return end
+                    local snap = getRecyclerSnapshot()
+                    if snap.locked or snap.busy then return end
+                    if snap.floorLocked then return end       -- tower floor requirement belum cukup
+                    if not snap.canUpgrade then return end     -- dah maxLevel(rebirthCount)
+                    if snap.money < snap.upgradeCost then return end
+                    UpgradeRecyclerRemote_ur:InvokeServer()
+                end)
+                task.wait(1) -- check tiap 1 saat — requirement naik lepas tiap upgrade berjaya
+            end
+            autoUpgradeRecyclerLoopRunning = false
+        end)
+    end
+
+    local aurRow = Instance.new("Frame")
+    aurRow.Size = UDim2.new(1, -8, 0, 22)
+    aurRow.Position = UDim2.new(0, 4, 0, 82)
+    aurRow.BackgroundTransparency = 1
+    aurRow.BorderSizePixel = 0
+    aurRow.Parent = V.upWrapper
+
+    local aurLbl = Instance.new("TextLabel")
+    aurLbl.Size = UDim2.new(0.55, 0, 1, 0)
+    aurLbl.BackgroundTransparency = 1
+    aurLbl.Text = "Auto Upgrade Recycler"
+    aurLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    aurLbl.TextSize = 10
+    aurLbl.Font = Enum.Font.Gotham
+    aurLbl.TextXAlignment = Enum.TextXAlignment.Left
+    aurLbl.Parent = aurRow
+
+    local aurStateText = Instance.new("TextLabel")
+    aurStateText.Size = UDim2.new(0.18, 0, 1, 0)
+    aurStateText.Position = UDim2.new(0.55, 0, 0, 0)
+    aurStateText.BackgroundTransparency = 1
+    aurStateText.Text = "OFF"
+    aurStateText.TextColor3 = Color3.fromRGB(160, 160, 160)
+    aurStateText.TextSize = 10
+    aurStateText.Font = Enum.Font.GothamBold
+    aurStateText.TextXAlignment = Enum.TextXAlignment.Right
+    aurStateText.Parent = aurRow
+
+    local aurPillTrack = Instance.new("Frame")
+    aurPillTrack.Size = UDim2.new(0, 34, 0, 16)
+    aurPillTrack.Position = UDim2.new(1, -34, 0.5, -8)
+    aurPillTrack.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    aurPillTrack.BorderSizePixel = 0
+    aurPillTrack.Parent = aurRow
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = aurPillTrack end
+
+    local aurKnob = Instance.new("Frame")
+    aurKnob.Size = UDim2.new(0, 12, 0, 12)
+    aurKnob.Position = UDim2.new(0, 2, 0.5, -6)
+    aurKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    aurKnob.BorderSizePixel = 0
+    aurKnob.Parent = aurPillTrack
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = aurKnob end
+
+    local aurToggleHitbox = Instance.new("TextButton")
+    aurToggleHitbox.Size = UDim2.new(0, 34, 0, 16)
+    aurToggleHitbox.Position = UDim2.new(1, -34, 0.5, -8)
+    aurToggleHitbox.BackgroundTransparency = 1
+    aurToggleHitbox.Text = ""
+    aurToggleHitbox.Parent = aurRow
+
+    local aurPillTween = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
+
+    local function updateAurPill(on)
+        if on then
+            V.TweenService:Create(aurPillTrack, aurPillTween, {BackgroundColor3 = Color3.fromRGB(255,255,255)}):Play()
+            V.TweenService:Create(aurKnob, aurPillTween, {Position = UDim2.new(0,20,0.5,-6), BackgroundColor3 = Color3.fromRGB(0,0,0)}):Play()
+            aurStateText.Text = "ON";  aurStateText.TextColor3 = Color3.fromRGB(255,255,255)
+        else
+            V.TweenService:Create(aurPillTrack, aurPillTween, {BackgroundColor3 = Color3.fromRGB(60,60,60)}):Play()
+            V.TweenService:Create(aurKnob, aurPillTween, {Position = UDim2.new(0,2,0.5,-6), BackgroundColor3 = Color3.fromRGB(200,200,200)}):Play()
+            aurStateText.Text = "OFF"; aurStateText.TextColor3 = Color3.fromRGB(160,160,160)
+        end
+    end
+
+    aurToggleHitbox.MouseButton1Click:Connect(function()
+        V.autoUpgradeRecyclerEnabled_af = not V.autoUpgradeRecyclerEnabled_af
+        updateAurPill(V.autoUpgradeRecyclerEnabled_af)
+        if V.autoUpgradeRecyclerEnabled_af then
+            autoUpgradeRecyclerRunLoop()
+        end
+    end)
+
+    -- cfg: Auto Upgrade Recycler toggle
+    V.cfgRead["auto_upgrade_recycler"] = function()
+        return {en = V.autoUpgradeRecyclerEnabled_af}
+    end
+    V.cfgApply["auto_upgrade_recycler"] = function(t)
+        local wantOn = (t.en == true)
+        if V.autoUpgradeRecyclerEnabled_af ~= wantOn then
+            V.autoUpgradeRecyclerEnabled_af = wantOn
+            updateAurPill(V.autoUpgradeRecyclerEnabled_af)
+            if V.autoUpgradeRecyclerEnabled_af then
+                autoUpgradeRecyclerRunLoop()
             end
         end
     end
