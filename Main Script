@@ -10142,34 +10142,45 @@ do -- === AUTO FARM (scoped) ===
                         end
                     end
 
+                    print(string.format("[ASR] Collect selesai: %d/%d scrap", collected, ASR_TARGET_SCRAP))
+
                     -- STEP 3: balik ke start position (precise)
                     if V.asrEnabled_af then
                         asrWalkToPrecise(hum, root, startPos, ASR_WALK_TIMEOUT)
                     end
+                    print("[ASR] STEP 3 selesai — dah balik start position")
 
                     -- STEP 4: tunggu ready-to-rebirth true (poll)
                     while V.asrEnabled_af do
                         local mods = atv2GetModules()
                         local reqFloor = mods and atv2GetRequirementFloor(mods)
                         local towerBest = mods and atv2GetTowerBest(mods)
+                        print(string.format("[ASR] STEP 4 check: mods=%s reqFloor=%s towerBest=%s",
+                            tostring(mods ~= nil), tostring(reqFloor), tostring(towerBest)))
                         if reqFloor and towerBest and towerBest >= reqFloor then
                             break
                         end
                         task.wait(ASR_READY_POLL_INTERVAL)
                     end
+                    print("[ASR] STEP 4 selesai — ready to rebirth = true")
 
                     -- STEP 5: tunggu chicken kembali dekat coop (poll)
                     while V.asrEnabled_af and not asrIsChickenAtCoop() do
+                        print("[ASR] STEP 5: chicken belum sampai coop, tunggu...")
                         task.wait(ASR_READY_POLL_INTERVAL)
                     end
+                    print("[ASR] STEP 5 selesai — chicken dah kat coop")
 
                     -- STEP 6+7: walk ke recycler + live money watch + fire
                     -- rebirth serta-merta, pastu balik ke start position
                     if V.asrEnabled_af then
                         local rPos = acsGetRecyclerPos()
                         local char2, hum2, root2 = acsGetChar()
+                        print(string.format("[ASR] STEP 6: rPos=%s hum2=%s root2=%s",
+                            tostring(rPos ~= nil), tostring(hum2 ~= nil), tostring(root2 ~= nil)))
                         if rPos and hum2 and root2 then
                             local moneyBefore = asrGetMoney()
+                            print("[ASR] STEP 6: moneyBefore=" .. tostring(moneyBefore) .. " — mula walk ke recycler...")
                             hum2:MoveTo(rPos)
 
                             local t0 = tick()
@@ -10177,6 +10188,7 @@ do -- === AUTO FARM (scoped) ===
                             while V.asrEnabled_af and (tick() - t0) < ASR_MONEY_WAIT_TIMEOUT do
                                 local moneyNow = asrGetMoney()
                                 if moneyBefore and moneyNow and moneyNow > moneyBefore then
+                                    print(string.format("[ASR] STEP 7: Money masuk %s -> %s — FIRE REBIRTH", tostring(moneyBefore), tostring(moneyNow)))
                                     pcall(function()
                                         game:GetService("ReplicatedStorage").Remotes.Rebirth:InvokeServer()
                                     end)
@@ -10184,6 +10196,9 @@ do -- === AUTO FARM (scoped) ===
                                     break
                                 end
                                 task.wait(ASR_MONEY_POLL_INTERVAL)
+                            end
+                            if not fired then
+                                print("[ASR] STEP 7: TIMEOUT — duit tak masuk dalam " .. ASR_MONEY_WAIT_TIMEOUT .. "s, rebirth TAK di-fire")
                             end
 
                             -- Lepas rebirth (character mungkin respawn),
