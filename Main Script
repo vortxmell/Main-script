@@ -9659,11 +9659,24 @@ do -- === AUTO FARM (scoped) ===
             local RebirthBonus = require(RS.Core.Progression.RebirthBonus)
             local RebirthExperiment = require(RS.Core.Progression.RebirthExperiment)
             local TowerFloor = require(RS.Features.Battle.tower.TowerFloor)
+            -- CONFIRMED dari dump CampaignController.stageView() — UI
+            -- sebenar resolve floor melalui Ladder.byIndex(floorNumber)
+            -- DULU (dapat v38.index SENDIRI), baru panggil
+            -- TowerFloor.previewStats(v38.index) — BUKAN floor number
+            -- mentah terus. Kalau Ladder punya index numbering tak 1:1
+            -- dengan towerBest+1 (contoh floor event/narrative yg remap),
+            -- previewStats(floor mentah) boleh bagi hasil salah/random.
+            -- Fix: panggil CampaignController.stageView() TERUS — function
+            -- SEBENAR yg UI "Stats Info" guna, 100% jaminan match, tak
+            -- payah reconstruct pipeline byIndex+previewStats sendiri.
+            local CampaignController = require(V.LocalPlayer:WaitForChild("PlayerScripts")
+                .Features.Battle.campaign.CampaignController)
             return {
                 DataController = DataController,
                 RebirthBonus = RebirthBonus,
                 RebirthExperiment = RebirthExperiment,
                 TowerFloor = TowerFloor,
+                CampaignController = CampaignController,
             }
         end)
         if not ok then return nil end
@@ -9751,26 +9764,43 @@ do -- === AUTO FARM (scoped) ===
 
     -- Reuse atGetMyCoop() (dah wujud atas, dari Auto Tower V1) untuk cari
     -- plot/ChickenBody yg sama — elak duplicate logic pencarian coop.
-    local function atv3GetMyLiveStats()
+    local function atv3GetMyLiveStats(debugPrint)
         local _, plot = atGetMyCoop()
         if not plot then
+            if debugPrint then print("[atv3Debug] plot tak jumpa (atGetMyCoop gagal)") end
             return nil, nil
         end
         local bodies = workspace:FindFirstChild("ChickenBodies")
         if not bodies then
+            if debugPrint then print("[atv3Debug] workspace.ChickenBodies tak jumpa") end
             return nil, nil
         end
+        local matchedAny = false
         for _, body in ipairs(bodies:GetChildren()) do
             if body.Name:find("coop:" .. tostring(plot), 1, true) then
+                matchedAny = true
                 local hpNode  = atSafeNavigate(body, "BillboardGui", "Frame", "canvas", "text", "stats", "row", "hp")
                 local atkNode = atSafeNavigate(body, "BillboardGui", "Frame", "canvas", "text", "stats", "row", "sword")
                 local hpText  = hpNode  and hpNode:IsA("TextLabel") and hpNode.Text or nil
                 local atkText = atkNode and atkNode:IsA("TextLabel") and atkNode.Text or nil
+                if debugPrint then
+                    print(("[atv3Debug] body=%s hpNode=%s atkNode=%s hpText=%s atkText=%s"):format(
+                        body.Name, tostring(hpNode), tostring(atkNode), tostring(hpText), tostring(atkText)))
+                end
                 local hp  = atv3ParseAbbrevText(hpText)
                 local atk = atv3ParseAbbrevText(atkText)
+                if debugPrint then
+                    print(("[atv3Debug] parsed hp=%s atk=%s"):format(tostring(hp), tostring(atk)))
+                end
                 if hp and atk then
                     return hp, atk
                 end
+            end
+        end
+        if debugPrint and not matchedAny then
+            print(("[atv3Debug] TAKDE ChickenBody match 'coop:%s' — nama body yg ada:"):format(tostring(plot)))
+            for _, body in ipairs(bodies:GetChildren()) do
+                print("  -", body.Name)
             end
         end
         return nil, nil
@@ -9782,16 +9812,30 @@ do -- === AUTO FARM (scoped) ===
     local AT3_STAT_MARGIN = 1.20 -- 20% margin
 
     -- Pulangkan: canBeat (bool|nil), myHp, myDmg, rivalHp, rivalDmg
-    local function atv3CanBeatFloor(mods2, requirementFloor)
-        local myHp, myDmg = atv3GetMyLiveStats()
+    local function atv3CanBeatFloor(mods2, requirementFloor, debugPrint)
+        local myHp, myDmg = atv3GetMyLiveStats(debugPrint)
         if not myHp or not myDmg then return nil end
 
-        local ok, rivalStats = pcall(function() return mods2.TowerFloor.previewStats(requirementFloor) end)
-        if not ok or not rivalStats then return nil end
+        -- CampaignController.stageView() — function SEBENAR yg UI "Stats
+        -- Info" guna (resolve Ladder.byIndex().index dulu baru previewStats,
+        -- BUKAN floor number mentah terus macam sebelum ni). Guna terus
+        -- supaya 100% match dengan apa yg dipaparkan dalam game.
+        local ok, stageData = pcall(function()
+            return mods2.CampaignController.stageView(requirementFloor)
+        end)
+        if debugPrint then
+            print(("[atv3Debug] stageView(%s) ok=%s result=%s"):format(
+                tostring(requirementFloor), tostring(ok), tostring(stageData)))
+            if ok and stageData then
+                print(("[atv3Debug] stageData.hp=%s damage=%s level=%s"):format(
+                    tostring(stageData.hp), tostring(stageData.damage), tostring(stageData.level)))
+            end
+        end
+        if not ok or not stageData then return nil end
 
-        local canBeat = (myHp >= rivalStats.hp * AT3_STAT_MARGIN)
-            and (myDmg >= rivalStats.damage * AT3_STAT_MARGIN)
-        return canBeat, myHp, myDmg, rivalStats.hp, rivalStats.damage
+        local canBeat = (myHp >= stageData.hp * AT3_STAT_MARGIN)
+            and (myDmg >= stageData.damage * AT3_STAT_MARGIN)
+        return canBeat, myHp, myDmg, stageData.hp, stageData.damage
     end
 
     local AT3_CHECK_INTERVAL = 2 -- saat antara check bila idle
@@ -9862,12 +9906,16 @@ do -- === AUTO FARM (scoped) ===
                     if not requirementFloor or not towerBest then
                         task.wait(AT3_CHECK_INTERVAL)
                     elseif towerBest >= requirementFloor then
-                        -- Target dah capai, takde apa nak climb lagi buat masa ni.
+                        -- Target (gate rebirth) dah capai, takde apa nak climb lagi buat masa ni.
                         task.wait(AT3_CHECK_INTERVAL)
                     else
-                        local canBeat = atv3CanBeatFloor(mods2, requirementFloor)
+                        -- PENTING: compare stats terhadap frontierFloor (floor
+                        -- SEBENAR yg akan difight = towerBest+1), BUKAN
+                        -- requirementFloor (gate rebirth threshold, floor
+                        -- lain sama sekali — punca rival stats salah sebelum ni).
+                        local frontierFloor = towerBest + 1
+                        local canBeat = atv3CanBeatFloor(mods2, frontierFloor)
                         if canBeat then
-                            local frontierFloor = towerBest + 1
                             local fired = atv2FireStraightToFrontier(frontierFloor)
                             if fired then
                                 atv3MonitorClimb(mods2, requirementFloor)
@@ -9901,30 +9949,41 @@ do -- === AUTO FARM (scoped) ===
     atv3StatusLbl.TextXAlignment = Enum.TextXAlignment.Left
     atv3StatusLbl.Parent = atv3StatusRow
 
+    local atv3DebugTick = 0
     task.spawn(function()
         while true do
             task.wait(1)
+            atv3DebugTick = atv3DebugTick + 1
+            local wantDebug = (atv3DebugTick % 5 == 0) -- print sekali setiap 5 saat, elak spam
             local ok = pcall(function()
                 local mods2 = atv2GetModules()
                 if mods2 then
                     local requirementFloor = atv2GetRequirementFloor(mods2)
-                    if requirementFloor then
+                    local towerBest = atv2GetTowerBest(mods2)
+                    if requirementFloor and towerBest then
+                        -- Papar stats terhadap frontierFloor (floor SEBENAR
+                        -- akan difight = towerBest+1) — sama floor yg logic
+                        -- fire guna, bukan requirementFloor (gate rebirth).
+                        local frontierFloor = towerBest + 1
                         local canBeat, myHp, myDmg, rivalHp, rivalDmg =
-                            atv3CanBeatFloor(mods2, requirementFloor)
+                            atv3CanBeatFloor(mods2, frontierFloor, wantDebug)
                         if myHp then
                             atv3StatusLbl.Text = string.format(
-                                "Stats: my %d/%d vs rival %d/%d",
-                                myHp, myDmg, rivalHp, rivalDmg)
+                                "Stats: my %d/%d vs rival %d/%d (floor %d)",
+                                myHp, myDmg, rivalHp, rivalDmg, frontierFloor)
                             atv3StatusLbl.TextColor3 = canBeat
                                 and Color3.fromRGB(120, 255, 120)
                                 or  Color3.fromRGB(200, 200, 200)
                         else
+                            if wantDebug then print("[atv3Debug] atv3CanBeatFloor pulangkan nil (myHp nil) — tengok print atas untuk sebab") end
                             atv3StatusLbl.Text = "Stats: my --/-- vs rival --/--"
                         end
                     else
+                        if wantDebug then print(("[atv3Debug] requirementFloor=%s towerBest=%s (salah satu nil)"):format(tostring(requirementFloor), tostring(towerBest))) end
                         atv3StatusLbl.Text = "Stats: my --/-- vs rival --/--"
                     end
                 else
+                    if wantDebug then print("[atv3Debug] mods2 nil (atv2GetModules gagal)") end
                     atv3StatusLbl.Text = "Stats: my --/-- vs rival --/--"
                 end
             end)
@@ -10052,6 +10111,8 @@ do -- === AUTO FARM (scoped) ===
     local ASR_READY_POLL_INTERVAL = 2    -- saat antara poll ready-to-rebirth / chicken-at-coop
     local ASR_MONEY_POLL_INTERVAL = 0.05 -- 50ms — secepat mungkin detect duit masuk
     local ASR_MONEY_WAIT_TIMEOUT  = 15
+    local ASR_MIN_SAFE_DIST_RECYCLER = 15 -- studs
+    local ASR_MIN_SAFE_DIST_COOP_PAD = 5  -- studs, padding luar bounding box coop
 
     V.asrEnabled_af = false
     local asrLoopRunning = false
@@ -10087,9 +10148,7 @@ do -- === AUTO FARM (scoped) ===
     -- dengan satu titik) — guna bounding box coop tu sendiri. Chicken
     -- baru turun boleh je muncul dalam radius X studs dari coop tapi
     -- belum betul-betul masuk/berdiri dalam coop — distance-to-point
-    -- check lama bagi false-positive utk kes ni. Toleransi Y sengaja
-    -- longgar sikit (chicken berdiri atas platform/structure, bukan
-    -- center-height coop, dan boleh sedikit di bawah base pun).
+    -- check lama bagi false-positive utk kes ni.
     local function asrIsPosInsideCoop(position, coopModel)
         local ok, cf, size = pcall(function() return coopModel:GetBoundingBox() end)
         if not ok or not cf or not size then return false end
@@ -10117,6 +10176,28 @@ do -- === AUTO FARM (scoped) ===
         return false
     end
 
+    -- Safety-check jarak minimum dari recycler & tapak coop — dinamik.
+    local function asrIsPosSafe(pos)
+        local rPos = acsGetRecyclerPos()
+        if rPos and (pos - rPos).Magnitude < ASR_MIN_SAFE_DIST_RECYCLER then
+            return false, "terlalu dekat recycler"
+        end
+        local coop = atGetMyCoop()
+        if coop then
+            local ok, cf, size = pcall(function() return coop:GetBoundingBox() end)
+            if ok and cf and size then
+                local rel = cf:PointToObjectSpace(pos)
+                local half = size / 2
+                if math.abs(rel.X) <= half.X + ASR_MIN_SAFE_DIST_COOP_PAD
+                   and math.abs(rel.Z) <= half.Z + ASR_MIN_SAFE_DIST_COOP_PAD
+                   and rel.Y >= -half.Y - 5 and rel.Y <= half.Y + 15 then
+                    return false, "dalam/terlalu dekat tapak coop"
+                end
+            end
+        end
+        return true, nil
+    end
+
     local function asrGetMoney()
         local ok, result = pcall(function()
             local DataController = require(V.LocalPlayer:WaitForChild("PlayerScripts").Core.Data.DataController)
@@ -10125,6 +10206,8 @@ do -- === AUTO FARM (scoped) ===
         if ok then return result end
         return nil
     end
+
+    local asrStartPos = nil
 
     local function asrRunLoop()
         if asrLoopRunning then return end
@@ -10135,8 +10218,20 @@ do -- === AUTO FARM (scoped) ===
                 if not root then
                     task.wait(0.5)
                 else
-                    -- STEP 0: simpan start position
-                    local startPos = root.Position
+                    -- STEP 0: kunci start position (SEKALI SAHAJA per sesi —
+                    -- elak cumulative drift dari return-walk yg tak 100%
+                    -- precise, punca asal deposit pramatang bila start pos
+                    -- hanyut masuk radius auto-deposit recycler)
+                    if not asrStartPos then
+                        local safe, reason = asrIsPosSafe(root.Position)
+                        if not safe then
+                            warn("[ASR] Posisi semasa " .. tostring(reason) ..
+                                " — toggle ON di lokasi lain (jauh dari recycler & tapak coop) untuk elak deposit pramatang.")
+                        end
+                        asrStartPos = root.Position
+                        print("[ASR] Start position dikunci:", tostring(asrStartPos))
+                    end
+                    local startPos = asrStartPos
 
                     -- STEP 1+2: loop collect 15 scrap — keep retry scan
                     -- kalau takde scrap available (tunggu spawn, bukan give up)
@@ -10304,6 +10399,8 @@ do -- === AUTO FARM (scoped) ===
         updateAsrPill(V.asrEnabled_af)
         if V.asrEnabled_af then
             asrRunLoop()
+        else
+            asrStartPos = nil -- reset supaya sesi seterusnya re-anchor dari posisi baru
         end
     end)
 
@@ -10318,6 +10415,8 @@ do -- === AUTO FARM (scoped) ===
             updateAsrPill(V.asrEnabled_af)
             if V.asrEnabled_af then
                 asrRunLoop()
+            else
+                asrStartPos = nil
             end
         end
     end
