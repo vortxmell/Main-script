@@ -10248,30 +10248,54 @@ do -- === AUTO FARM (scoped) ===
 
     -- Reuse atGetMyCoop() (dah wujud atas, dari Auto Tower V1) untuk cari
     -- plot/ChickenBody yg sama — elak duplicate logic pencarian coop.
-    local function atv3GetMyLiveStats()
+    local function atv3GetMyLiveStats(debugPrint)
         local _, plot = atGetMyCoop()
-        if not plot then return nil, nil end
+        if not plot then
+            if debugPrint then print("[atv3Debug] plot tak jumpa (atGetMyCoop gagal)") end
+            return nil, nil
+        end
         local bodies = workspace:FindFirstChild("ChickenBodies")
-        if not bodies then return nil, nil end
+        if not bodies then
+            if debugPrint then print("[atv3Debug] workspace.ChickenBodies tak jumpa") end
+            return nil, nil
+        end
+        local matchedAny = false
         for _, body in ipairs(bodies:GetChildren()) do
             if body.Name:find("coop:" .. tostring(plot), 1, true) then
+                matchedAny = true
                 local hpNode  = atSafeNavigate(body, "BillboardGui", "Frame", "canvas", "text", "stats", "row", "hp")
                 local atkNode = atSafeNavigate(body, "BillboardGui", "Frame", "canvas", "text", "stats", "row", "sword")
+                if debugPrint then
+                    print(("[atv3Debug] body=%s hpNode=%s atkNode=%s"):format(
+                        body.Name, tostring(hpNode), tostring(atkNode)))
+                end
                 local hpText  = hpNode  and hpNode:IsA("TextLabel") and hpNode.Text or nil
                 local atkText = atkNode and atkNode:IsA("TextLabel") and atkNode.Text or nil
+                if debugPrint then
+                    print(("[atv3Debug] hpText=%s atkText=%s"):format(tostring(hpText), tostring(atkText)))
+                end
                 local hp  = atv3ParseAbbrevText(hpText)
                 local atk = atv3ParseAbbrevText(atkText)
+                if debugPrint then
+                    print(("[atv3Debug] parsed hp=%s atk=%s"):format(tostring(hp), tostring(atk)))
+                end
                 if hp and atk then
                     return hp, atk
                 end
+            end
+        end
+        if debugPrint and not matchedAny then
+            print(("[atv3Debug] TAKDE ChickenBody yang match 'coop:%s' — nama body yang ada:"):format(tostring(plot)))
+            for _, body in ipairs(bodies:GetChildren()) do
+                print("  -", body.Name)
             end
         end
         return nil, nil
     end
 
     -- Pulangkan: canBeat (bool|nil), myHp, myDmg, rivalHp, rivalDmg
-    local function atv3CanBeatFloor(mods2, requirementFloor)
-        local myHp, myDmg = atv3GetMyLiveStats()
+    local function atv3CanBeatFloor(mods2, requirementFloor, debugPrint)
+        local myHp, myDmg = atv3GetMyLiveStats(debugPrint)
         if not myHp or not myDmg then return nil end
 
         local ok, rivalStats = pcall(function() return mods2.TowerFloor.previewStats(requirementFloor) end)
@@ -10388,16 +10412,19 @@ do -- === AUTO FARM (scoped) ===
     atv3StatusLbl.TextXAlignment = Enum.TextXAlignment.Left
     atv3StatusLbl.Parent = atv3StatusRow
 
+    local atv3DebugTick = 0
     task.spawn(function()
         while true do
             task.wait(1)
+            atv3DebugTick = atv3DebugTick + 1
+            local wantDebug = (atv3DebugTick % 5 == 0) -- print sekali setiap 5 saat je, elak spam
             local ok = pcall(function()
                 local mods2 = atv2GetModules()
                 if mods2 then
                     local requirementFloor = atv2GetRequirementFloor(mods2)
                     if requirementFloor then
                         local canBeat, myHp, myDmg, rivalHp, rivalDmg =
-                            atv3CanBeatFloor(mods2, requirementFloor)
+                            atv3CanBeatFloor(mods2, requirementFloor, wantDebug)
                         if myHp then
                             atv3StatusLbl.Text = string.format(
                                 "Stats: my %d/%d vs rival %d/%d",
@@ -10409,9 +10436,11 @@ do -- === AUTO FARM (scoped) ===
                             atv3StatusLbl.Text = "Stats: my --/-- vs rival --/--"
                         end
                     else
+                        if wantDebug then print("[atv3Debug] requirementFloor tak jumpa (atv2GetRequirementFloor gagal)") end
                         atv3StatusLbl.Text = "Stats: my --/-- vs rival --/--"
                     end
                 else
+                    if wantDebug then print("[atv3Debug] mods2 tak jumpa (atv2GetModules gagal)") end
                     atv3StatusLbl.Text = "Stats: my --/-- vs rival --/--"
                 end
             end)
