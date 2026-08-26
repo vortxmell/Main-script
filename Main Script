@@ -10293,6 +10293,11 @@ do -- === AUTO FARM (scoped) ===
         return nil, nil
     end
 
+    -- Margin buffer supaya stats kita perlu LEBIH dari rival (bukan
+    -- sekadar sama/≥), elak fire terus ke frontier walaupun stats tepat-
+    -- tepat sama je dengan rival (risiko kalah sikit sebab rounding/lag).
+    local AT3_STAT_MARGIN = 1.10 -- 10% margin
+
     -- Pulangkan: canBeat (bool|nil), myHp, myDmg, rivalHp, rivalDmg
     local function atv3CanBeatFloor(mods2, requirementFloor, debugPrint)
         local myHp, myDmg = atv3GetMyLiveStats(debugPrint)
@@ -10301,7 +10306,8 @@ do -- === AUTO FARM (scoped) ===
         local ok, rivalStats = pcall(function() return mods2.TowerFloor.previewStats(requirementFloor) end)
         if not ok or not rivalStats then return nil end
 
-        local canBeat = (myHp >= rivalStats.hp) and (myDmg >= rivalStats.damage)
+        local canBeat = (myHp >= rivalStats.hp * AT3_STAT_MARGIN)
+            and (myDmg >= rivalStats.damage * AT3_STAT_MARGIN)
         return canBeat, myHp, myDmg, rivalStats.hp, rivalStats.damage
     end
 
