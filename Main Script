@@ -10126,44 +10126,6 @@ do -- === AUTO FARM (scoped) ===
         return nil
     end
 
-    -- Safety-check jarak minimum dari recycler & tapak coop — dinamik
-    -- (guna acsGetRecyclerPos()/atGetMyCoop() semasa, BUKAN hardcode),
-    -- supaya sah walau server lain dapat plot/coop lain.
-    local ASR_MIN_SAFE_DIST_RECYCLER = 15 -- studs
-    local ASR_MIN_SAFE_DIST_COOP_PAD = 5  -- studs, padding luar bounding box coop
-
-    local function asrIsPosSafe(pos)
-        local rPos = acsGetRecyclerPos()
-        if rPos and (pos - rPos).Magnitude < ASR_MIN_SAFE_DIST_RECYCLER then
-            return false, "terlalu dekat recycler"
-        end
-        local coop = atGetMyCoop()
-        if coop then
-            local ok, cf, size = pcall(function() return coop:GetBoundingBox() end)
-            if ok and cf and size then
-                local rel = cf:PointToObjectSpace(pos)
-                local half = size / 2
-                if math.abs(rel.X) <= half.X + ASR_MIN_SAFE_DIST_COOP_PAD
-                   and math.abs(rel.Z) <= half.Z + ASR_MIN_SAFE_DIST_COOP_PAD
-                   and rel.Y >= -half.Y - 5 and rel.Y <= half.Y + 15 then
-                    return false, "dalam/terlalu dekat tapak coop"
-                end
-            end
-        end
-        return true, nil
-    end
-
-    -- Start position dikunci SEKALI SAHAJA setiap sesi toggle ON (bukan
-    -- di-capture semula setiap loop iteration). Punca asal bug drift:
-    -- asrWalkToPrecise() balik dari recycler ada tolerance (±1.5 studs,
-    -- retry max 5) — kalau tak 100% precise, "start position" iteration
-    -- SETERUSNYA (dulu di-capture dari root.Position semasa tu) jadi
-    -- sedikit lari, terkumpul makin dekat ke recycler setiap loop, sampai
-    -- akhirnya masuk radius auto-deposit recycler. Fix: reference point
-    -- SATU je sepanjang sesi — setiap "balik start" target koordinat asal
-    -- yg sama persis, tak kira macam mana drift return-walk sebelumnya.
-    local asrStartPos = nil
-
     local function asrRunLoop()
         if asrLoopRunning then return end
         asrLoopRunning = true
@@ -10173,17 +10135,8 @@ do -- === AUTO FARM (scoped) ===
                 if not root then
                     task.wait(0.5)
                 else
-                    -- STEP 0: kunci start position (sekali sahaja per sesi)
-                    if not asrStartPos then
-                        local safe, reason = asrIsPosSafe(root.Position)
-                        if not safe then
-                            warn("[ASR] Posisi semasa " .. tostring(reason) ..
-                                " — toggle ON di lokasi lain (jauh dari recycler & tapak coop) untuk elak deposit pramatang.")
-                        end
-                        asrStartPos = root.Position
-                        print("[ASR] Start position dikunci:", tostring(asrStartPos))
-                    end
-                    local startPos = asrStartPos
+                    -- STEP 0: simpan start position
+                    local startPos = root.Position
 
                     -- STEP 1+2: loop collect 15 scrap — keep retry scan
                     -- kalau takde scrap available (tunggu spawn, bukan give up)
@@ -10351,8 +10304,6 @@ do -- === AUTO FARM (scoped) ===
         updateAsrPill(V.asrEnabled_af)
         if V.asrEnabled_af then
             asrRunLoop()
-        else
-            asrStartPos = nil -- reset supaya sesi seterusnya re-anchor dari posisi baru
         end
     end)
 
@@ -10367,8 +10318,6 @@ do -- === AUTO FARM (scoped) ===
             updateAsrPill(V.asrEnabled_af)
             if V.asrEnabled_af then
                 asrRunLoop()
-            else
-                asrStartPos = nil
             end
         end
     end
