@@ -9659,26 +9659,17 @@ do -- === AUTO FARM (scoped) ===
             local RebirthBonus = require(RS.Core.Progression.RebirthBonus)
             local RebirthExperiment = require(RS.Core.Progression.RebirthExperiment)
             local TowerFloor = require(RS.Features.Battle.tower.TowerFloor)
-            -- CONFIRMED dari dump CampaignController.stageView() — UI
-            -- sebenar resolve floor melalui Ladder.byIndex(floorNumber)
-            -- DULU (dapat v38.index SENDIRI), baru panggil
-            -- TowerFloor.previewStats(v38.index) — BUKAN floor number
-            -- mentah terus.
-            -- CONFIRMED via debug (8x test): CampaignController.stageView()
-            -- SENTIASA pulangkan nil dari konteks script kita — pcall ok=true
-            -- tapi function sendiri return nil awal (Ladder.byIndex kemungkinan
-            -- perlu CampaignController.Start() dipanggil dulu oleh UI Tower
-            -- SEBENAR, yg tak pernah berlaku sepanjang sesi exploit). Fix:
-            -- skip CampaignController (elak dependency lifecycle fragile),
-            -- panggil terus Ladder.byIndex() + TowerFloor.previewStats()
-            -- SENDIRI — dua baris yg sama persis stageView() buat dalaman.
-            local Ladder = require(RS.Features.Battle.campaign.Ladder)
+            -- REVERT: Ladder/CampaignController ialah sistem "Campaign
+            -- zones" BERASINGAN — TAK berkaitan dengan Tower endless-climb
+            -- sebenar (confirm dari screenshot "K.O. FLOOR 90" — Ladder.count
+            -- cuma 18, mustahil kalau ia betul-betul floor tower). Tower
+            -- sebenar guna TowerFloor.previewStats(floorNumber) TERUS,
+            -- floor number plain (1,2,3...90+), tiada index-remapping.
             return {
                 DataController = DataController,
                 RebirthBonus = RebirthBonus,
                 RebirthExperiment = RebirthExperiment,
                 TowerFloor = TowerFloor,
-                Ladder = Ladder,
             }
         end)
         if not ok then return nil end
@@ -9821,32 +9812,15 @@ do -- === AUTO FARM (scoped) ===
             return nil
         end
 
-        -- CONFIRMED via debug: Ladder.byIndex(floorNumber) direct, BUKAN
-        -- CampaignController.stageView() (yg sentiasa nil dari konteks kita
-        -- — kemungkinan perlukan CampaignController.Start() dari UI Tower
-        -- sebenar yg tak pernah berlaku sepanjang sesi exploit).
-        local okLadder, stage = pcall(function()
-            return mods2.Ladder.byIndex(requirementFloor)
-        end)
-        if debugPrint then
-            print(("[atv3Debug] Ladder.count=%s (floor MAKSIMUM yang wujud buat masa ni)"):format(tostring(mods2.Ladder.count)))
-            print(("[atv3Debug] Ladder.byIndex(%s) ok=%s stage=%s"):format(
-                tostring(requirementFloor), tostring(okLadder), tostring(stage)))
-            if okLadder and stage then
-                print(("[atv3Debug] stage.index=%s"):format(tostring(stage.index)))
-            end
-        end
-        if not okLadder or not stage or not stage.index then
-            if debugPrint then print("[atv3Debug] atv3CanBeatFloor: Ladder.byIndex gagal/nil") end
-            return nil
-        end
-
+        -- REVERT: TowerFloor.previewStats(floorNumber) TERUS — floor number
+        -- plain (1,2,3...90+), Ladder/CampaignController TIDAK relevant
+        -- (sistem lain sama sekali, confirm dari screenshot "K.O. FLOOR 90").
         local ok, rivalStats = pcall(function()
-            return mods2.TowerFloor.previewStats(stage.index)
+            return mods2.TowerFloor.previewStats(requirementFloor)
         end)
         if debugPrint then
             print(("[atv3Debug] previewStats(%s) ok=%s result=%s"):format(
-                tostring(stage.index), tostring(ok), tostring(rivalStats)))
+                tostring(requirementFloor), tostring(ok), tostring(rivalStats)))
             if ok and rivalStats then
                 print(("[atv3Debug] rivalStats.hp=%s damage=%s"):format(
                     tostring(rivalStats.hp), tostring(rivalStats.damage)))
@@ -9926,25 +9900,11 @@ do -- === AUTO FARM (scoped) ===
                 else
                     local requirementFloor = atv2GetRequirementFloor(mods2)
                     local towerBest = atv2GetTowerBest(mods2)
-                    local ladderCount = mods2.Ladder and mods2.Ladder.count
-
-                    -- Target sebenar tak boleh lebih dari Ladder.count (floor
-                    -- MAKSIMUM yg wujud dalam content semasa). Kalau
-                    -- requirementFloor (gate rebirth) lebih tinggi dari
-                    -- Ladder.count, tower content tu sendiri belum sampai
-                    -- situ — climb lagi jauh mustahil sampai developer tambah
-                    -- floor baru. Clamp supaya loop stop bila dah capai
-                    -- ceiling sebenar, bukan retry gagal berulang-ulang.
-                    local effectiveTarget = requirementFloor
-                    if ladderCount and requirementFloor and ladderCount < requirementFloor then
-                        effectiveTarget = ladderCount
-                    end
 
                     if not requirementFloor or not towerBest then
                         task.wait(AT3_CHECK_INTERVAL)
-                    elseif towerBest >= effectiveTarget then
-                        -- Target (gate rebirth, atau ceiling Ladder.count kalau
-                        -- content belum sampai situ) dah capai.
+                    elseif towerBest >= requirementFloor then
+                        -- Target (gate rebirth) dah capai, takde apa nak climb lagi buat masa ni.
                         task.wait(AT3_CHECK_INTERVAL)
                     else
                         -- PENTING: compare stats terhadap frontierFloor (floor
