@@ -9663,20 +9663,22 @@ do -- === AUTO FARM (scoped) ===
             -- sebenar resolve floor melalui Ladder.byIndex(floorNumber)
             -- DULU (dapat v38.index SENDIRI), baru panggil
             -- TowerFloor.previewStats(v38.index) — BUKAN floor number
-            -- mentah terus. Kalau Ladder punya index numbering tak 1:1
-            -- dengan towerBest+1 (contoh floor event/narrative yg remap),
-            -- previewStats(floor mentah) boleh bagi hasil salah/random.
-            -- Fix: panggil CampaignController.stageView() TERUS — function
-            -- SEBENAR yg UI "Stats Info" guna, 100% jaminan match, tak
-            -- payah reconstruct pipeline byIndex+previewStats sendiri.
-            local CampaignController = require(V.LocalPlayer:WaitForChild("PlayerScripts")
-                .Features.Battle.campaign.CampaignController)
+            -- mentah terus.
+            -- CONFIRMED via debug (8x test): CampaignController.stageView()
+            -- SENTIASA pulangkan nil dari konteks script kita — pcall ok=true
+            -- tapi function sendiri return nil awal (Ladder.byIndex kemungkinan
+            -- perlu CampaignController.Start() dipanggil dulu oleh UI Tower
+            -- SEBENAR, yg tak pernah berlaku sepanjang sesi exploit). Fix:
+            -- skip CampaignController (elak dependency lifecycle fragile),
+            -- panggil terus Ladder.byIndex() + TowerFloor.previewStats()
+            -- SENDIRI — dua baris yg sama persis stageView() buat dalaman.
+            local Ladder = require(RS.Features.Battle.campaign.Ladder)
             return {
                 DataController = DataController,
                 RebirthBonus = RebirthBonus,
                 RebirthExperiment = RebirthExperiment,
                 TowerFloor = TowerFloor,
-                CampaignController = CampaignController,
+                Ladder = Ladder,
             }
         end)
         if not ok then return nil end
@@ -9814,28 +9816,49 @@ do -- === AUTO FARM (scoped) ===
     -- Pulangkan: canBeat (bool|nil), myHp, myDmg, rivalHp, rivalDmg
     local function atv3CanBeatFloor(mods2, requirementFloor, debugPrint)
         local myHp, myDmg = atv3GetMyLiveStats(debugPrint)
-        if not myHp or not myDmg then return nil end
+        if not myHp or not myDmg then
+            if debugPrint then print("[atv3Debug] atv3CanBeatFloor: myHp/myDmg nil (billboard read gagal)") end
+            return nil
+        end
 
-        -- CampaignController.stageView() — function SEBENAR yg UI "Stats
-        -- Info" guna (resolve Ladder.byIndex().index dulu baru previewStats,
-        -- BUKAN floor number mentah terus macam sebelum ni). Guna terus
-        -- supaya 100% match dengan apa yg dipaparkan dalam game.
-        local ok, stageData = pcall(function()
-            return mods2.CampaignController.stageView(requirementFloor)
+        -- CONFIRMED via debug: Ladder.byIndex(floorNumber) direct, BUKAN
+        -- CampaignController.stageView() (yg sentiasa nil dari konteks kita
+        -- — kemungkinan perlukan CampaignController.Start() dari UI Tower
+        -- sebenar yg tak pernah berlaku sepanjang sesi exploit).
+        local okLadder, stage = pcall(function()
+            return mods2.Ladder.byIndex(requirementFloor)
         end)
         if debugPrint then
-            print(("[atv3Debug] stageView(%s) ok=%s result=%s"):format(
-                tostring(requirementFloor), tostring(ok), tostring(stageData)))
-            if ok and stageData then
-                print(("[atv3Debug] stageData.hp=%s damage=%s level=%s"):format(
-                    tostring(stageData.hp), tostring(stageData.damage), tostring(stageData.level)))
+            print(("[atv3Debug] Ladder.byIndex(%s) ok=%s stage=%s"):format(
+                tostring(requirementFloor), tostring(okLadder), tostring(stage)))
+            if okLadder and stage then
+                print(("[atv3Debug] stage.index=%s"):format(tostring(stage.index)))
             end
         end
-        if not ok or not stageData then return nil end
+        if not okLadder or not stage or not stage.index then
+            if debugPrint then print("[atv3Debug] atv3CanBeatFloor: Ladder.byIndex gagal/nil") end
+            return nil
+        end
 
-        local canBeat = (myHp >= stageData.hp * AT3_STAT_MARGIN)
-            and (myDmg >= stageData.damage * AT3_STAT_MARGIN)
-        return canBeat, myHp, myDmg, stageData.hp, stageData.damage
+        local ok, rivalStats = pcall(function()
+            return mods2.TowerFloor.previewStats(stage.index)
+        end)
+        if debugPrint then
+            print(("[atv3Debug] previewStats(%s) ok=%s result=%s"):format(
+                tostring(stage.index), tostring(ok), tostring(rivalStats)))
+            if ok and rivalStats then
+                print(("[atv3Debug] rivalStats.hp=%s damage=%s"):format(
+                    tostring(rivalStats.hp), tostring(rivalStats.damage)))
+            end
+        end
+        if not ok or not rivalStats then
+            if debugPrint then print("[atv3Debug] atv3CanBeatFloor: previewStats gagal/nil") end
+            return nil
+        end
+
+        local canBeat = (myHp >= rivalStats.hp * AT3_STAT_MARGIN)
+            and (myDmg >= rivalStats.damage * AT3_STAT_MARGIN)
+        return canBeat, myHp, myDmg, rivalStats.hp, rivalStats.damage
     end
 
     local AT3_CHECK_INTERVAL = 2 -- saat antara check bila idle
@@ -9975,7 +9998,7 @@ do -- === AUTO FARM (scoped) ===
                                 and Color3.fromRGB(120, 255, 120)
                                 or  Color3.fromRGB(200, 200, 200)
                         else
-                            if wantDebug then print("[atv3Debug] atv3CanBeatFloor pulangkan nil (myHp nil) — tengok print atas untuk sebab") end
+                            if wantDebug then print("[atv3Debug] atv3CanBeatFloor pulangkan nil — tengok print atas untuk sebab sebenar") end
                             atv3StatusLbl.Text = "Stats: my --/-- vs rival --/--"
                         end
                     else
