@@ -607,7 +607,7 @@ V.TOOLS_DROP_OPEN_H  = 80   -- Tools: Wall Tools row + Platform Tools row
 -- Farming dropdown: Auto Collect Scrap, Auto Rebirth, Auto Tower (V3 —
 -- V1/V2 dah completely removed).
 V.AF_DROP_CLOSED_H = 24
-V.AF_DROP_OPEN_H   = 130
+V.AF_DROP_OPEN_H   = 152
 V.afDropOpen = false
 -- Upgrades dropdown: Auto Upgrade Coop + Auto Upgrade Feeder.
 V.UP_DROP_CLOSED_H = 24
@@ -10019,6 +10019,275 @@ do -- === AUTO FARM (scoped) ===
             updateAtv3Pill(V.autoTowerV3Enabled_af)
             if V.autoTowerV3Enabled_af then
                 autoTowerV3RunLoop()
+            end
+        end
+    end
+
+    -- ═══ Auto Scrap + Rebirth (y=124) ═══════════════════════════════
+    -- Flow (dah confirmed jalan via test_scrap_rebirth_v2.lua):
+    --   1. Simpan posisi start.
+    --   2. Loop collect 15 scrap — kalau takde scrap available skrg,
+    --      KEEP RETRY SCAN (bukan give up) sampai scrap spawn.
+    --   3. Balik ke start position (precise — retry-correct sampai
+    --      betul2 dekat, MoveTo() punya tolerance agak longgar).
+    --   4. Tunggu "ready to rebirth" true (poll, bukan sekali check).
+    --   5. Tunggu chicken kembali dekat coop (poll).
+    --   6. Walk ke recycler SAMBIL live-watch money — bila money mula
+    --      naik (deposit scrap dikira), FIRE rebirth serta-merta (tak
+    --      tunggu betul2 arrive recycler dulu).
+    --   7. Lepas rebirth (atau timeout), balik ke start position asal.
+    --   8. Ulang balik dari step 1, selagi toggle ON.
+    --
+    -- Reuse helper dari Auto Collect Scrap (acsGetChar/acsGetPos/
+    -- acsGetNearestScrap/acsGetRecyclerPos) dan Auto Tower V3
+    -- (atGetMyCoop/atv2GetModules/atv2GetRequirementFloor/
+    -- atv2GetTowerBest) — semua plain local dlm scope AUTO FARM yg
+    -- sama, jadi boleh terus dipanggil di sini.
+    local ASR_TARGET_SCRAP        = 15
+    local ASR_COLLECT_WAIT        = 2
+    local ASR_WALK_TIMEOUT        = 15
+    local ASR_SCAN_RETRY_WAIT     = 1    -- saat antara re-scan bila takde scrap
+    local ASR_PRECISE_THRESHOLD   = 1.5  -- studs — dianggap "sampai" utk return-to-start
+    local ASR_PRECISE_MAX_RETRY   = 5
+    local ASR_READY_POLL_INTERVAL = 2    -- saat antara poll ready-to-rebirth / chicken-at-coop
+    local ASR_MONEY_POLL_INTERVAL = 0.05 -- 50ms — secepat mungkin detect duit masuk
+    local ASR_MONEY_WAIT_TIMEOUT  = 15
+    local ASR_CHICKEN_AT_COOP_DIST = 50
+
+    V.asrEnabled_af = false
+    local asrLoopRunning = false
+
+    -- Walk yg respect toggle V.asrEnabled_af sendiri (BUKAN reuse
+    -- acsWalkTo terus — acsWalkTo punya loop tied ke V.acsEnabled_af,
+    -- toggle Auto Collect Scrap yg lain, boleh exit awal kalau toggle
+    -- tu OFF walaupun Auto Scrap+Rebirth tengah jalan).
+    local function asrWalkTo(hum, root, targetPos, timeout)
+        timeout = timeout or ASR_WALK_TIMEOUT
+        hum:MoveTo(targetPos)
+        local reached = false
+        local conn
+        conn = hum.MoveToFinished:Connect(function() reached = true end)
+        local t0 = tick()
+        while V.asrEnabled_af and not reached and (tick() - t0) < timeout do
+            task.wait(0.1)
+        end
+        if conn.Connected then conn:Disconnect() end
+    end
+
+    local function asrWalkToPrecise(hum, root, targetPos, timeout)
+        for _ = 1, ASR_PRECISE_MAX_RETRY do
+            if not V.asrEnabled_af then return false end
+            asrWalkTo(hum, root, targetPos, timeout)
+            local dist = (root.Position - targetPos).Magnitude
+            if dist <= ASR_PRECISE_THRESHOLD then return true end
+        end
+        return false
+    end
+
+    local function asrIsChickenAtCoop()
+        local coop, plot = atGetMyCoop()
+        if not coop or not plot then return false end
+        local coopPos = acsGetPos(coop)
+        if not coopPos then return false end
+        local bodies = workspace:FindFirstChild("ChickenBodies")
+        if not bodies then return false end
+        for _, body in ipairs(bodies:GetChildren()) do
+            if body.Name:find("coop:" .. tostring(plot), 1, true) then
+                local p = acsGetPos(body)
+                if p then
+                    return (p - coopPos).Magnitude < ASR_CHICKEN_AT_COOP_DIST
+                end
+            end
+        end
+        return false
+    end
+
+    local function asrGetMoney()
+        local ok, result = pcall(function()
+            local DataController = require(V.LocalPlayer:WaitForChild("PlayerScripts").Core.Data.DataController)
+            return DataController.money():toNumber()
+        end)
+        if ok then return result end
+        return nil
+    end
+
+    local function asrRunLoop()
+        if asrLoopRunning then return end
+        asrLoopRunning = true
+        task.spawn(function()
+            while V.asrEnabled_af do
+                local char, hum, root = acsGetChar()
+                if not root then
+                    task.wait(0.5)
+                else
+                    -- STEP 0: simpan start position
+                    local startPos = root.Position
+
+                    -- STEP 1+2: loop collect 15 scrap — keep retry scan
+                    -- kalau takde scrap available (tunggu spawn, bukan give up)
+                    local collected = 0
+                    while V.asrEnabled_af and collected < ASR_TARGET_SCRAP do
+                        local scrap, scrapPos = acsGetNearestScrap(root)
+                        if not scrap then
+                            task.wait(ASR_SCAN_RETRY_WAIT) -- takde scrap skrg, keep retry
+                        else
+                            asrWalkTo(hum, root, scrapPos, ASR_WALK_TIMEOUT)
+                            local t0 = tick()
+                            while V.asrEnabled_af and scrap.Parent and (tick() - t0) < ASR_COLLECT_WAIT do
+                                task.wait(0.1)
+                            end
+                            if not scrap.Parent then
+                                collected = collected + 1
+                            end
+                        end
+                    end
+
+                    -- STEP 3: balik ke start position (precise)
+                    if V.asrEnabled_af then
+                        asrWalkToPrecise(hum, root, startPos, ASR_WALK_TIMEOUT)
+                    end
+
+                    -- STEP 4: tunggu ready-to-rebirth true (poll)
+                    while V.asrEnabled_af do
+                        local mods = atv2GetModules()
+                        local reqFloor = mods and atv2GetRequirementFloor(mods)
+                        local towerBest = mods and atv2GetTowerBest(mods)
+                        if reqFloor and towerBest and towerBest >= reqFloor then
+                            break
+                        end
+                        task.wait(ASR_READY_POLL_INTERVAL)
+                    end
+
+                    -- STEP 5: tunggu chicken kembali dekat coop (poll)
+                    while V.asrEnabled_af and not asrIsChickenAtCoop() do
+                        task.wait(ASR_READY_POLL_INTERVAL)
+                    end
+
+                    -- STEP 6+7: walk ke recycler + live money watch + fire
+                    -- rebirth serta-merta, pastu balik ke start position
+                    if V.asrEnabled_af then
+                        local rPos = acsGetRecyclerPos()
+                        local char2, hum2, root2 = acsGetChar()
+                        if rPos and hum2 and root2 then
+                            local moneyBefore = asrGetMoney()
+                            hum2:MoveTo(rPos)
+
+                            local t0 = tick()
+                            local fired = false
+                            while V.asrEnabled_af and (tick() - t0) < ASR_MONEY_WAIT_TIMEOUT do
+                                local moneyNow = asrGetMoney()
+                                if moneyBefore and moneyNow and moneyNow > moneyBefore then
+                                    pcall(function()
+                                        game:GetService("ReplicatedStorage").Remotes.Rebirth:InvokeServer()
+                                    end)
+                                    fired = true
+                                    break
+                                end
+                                task.wait(ASR_MONEY_POLL_INTERVAL)
+                            end
+
+                            -- Lepas rebirth (character mungkin respawn),
+                            -- tunggu sekejap pastu re-fetch char sebelum
+                            -- balik ke start position.
+                            if fired then task.wait(1) end
+                            if V.asrEnabled_af then
+                                local char3, hum3, root3 = acsGetChar()
+                                if hum3 and root3 then
+                                    asrWalkToPrecise(hum3, root3, startPos, ASR_WALK_TIMEOUT)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            asrLoopRunning = false
+        end)
+    end
+
+    local asrRow = Instance.new("Frame")
+    asrRow.Size = UDim2.new(1, -8, 0, 22)
+    asrRow.Position = UDim2.new(0, 4, 0, 124)
+    asrRow.BackgroundTransparency = 1
+    asrRow.BorderSizePixel = 0
+    asrRow.Parent = V.afWrapper
+
+    local asrLbl = Instance.new("TextLabel")
+    asrLbl.Size = UDim2.new(0.55, 0, 1, 0)
+    asrLbl.BackgroundTransparency = 1
+    asrLbl.Text = "Auto Scrap + Rebirth"
+    asrLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    asrLbl.TextSize = 10
+    asrLbl.Font = Enum.Font.Gotham
+    asrLbl.TextXAlignment = Enum.TextXAlignment.Left
+    asrLbl.Parent = asrRow
+
+    local asrStateText = Instance.new("TextLabel")
+    asrStateText.Size = UDim2.new(0.18, 0, 1, 0)
+    asrStateText.Position = UDim2.new(0.55, 0, 0, 0)
+    asrStateText.BackgroundTransparency = 1
+    asrStateText.Text = "OFF"
+    asrStateText.TextColor3 = Color3.fromRGB(160, 160, 160)
+    asrStateText.TextSize = 10
+    asrStateText.Font = Enum.Font.GothamBold
+    asrStateText.TextXAlignment = Enum.TextXAlignment.Right
+    asrStateText.Parent = asrRow
+
+    local asrPillTrack = Instance.new("Frame")
+    asrPillTrack.Size = UDim2.new(0, 34, 0, 16)
+    asrPillTrack.Position = UDim2.new(1, -34, 0.5, -8)
+    asrPillTrack.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    asrPillTrack.BorderSizePixel = 0
+    asrPillTrack.Parent = asrRow
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = asrPillTrack end
+
+    local asrKnob = Instance.new("Frame")
+    asrKnob.Size = UDim2.new(0, 12, 0, 12)
+    asrKnob.Position = UDim2.new(0, 2, 0.5, -6)
+    asrKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    asrKnob.BorderSizePixel = 0
+    asrKnob.Parent = asrPillTrack
+    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = asrKnob end
+
+    local asrToggleHitbox = Instance.new("TextButton")
+    asrToggleHitbox.Size = UDim2.new(0, 34, 0, 16)
+    asrToggleHitbox.Position = UDim2.new(1, -34, 0.5, -8)
+    asrToggleHitbox.BackgroundTransparency = 1
+    asrToggleHitbox.Text = ""
+    asrToggleHitbox.Parent = asrRow
+
+    local asrPillTween = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
+
+    local function updateAsrPill(on)
+        if on then
+            V.TweenService:Create(asrPillTrack, asrPillTween, {BackgroundColor3 = Color3.fromRGB(255,255,255)}):Play()
+            V.TweenService:Create(asrKnob, asrPillTween, {Position = UDim2.new(0,20,0.5,-6), BackgroundColor3 = Color3.fromRGB(0,0,0)}):Play()
+            asrStateText.Text = "ON";  asrStateText.TextColor3 = Color3.fromRGB(255,255,255)
+        else
+            V.TweenService:Create(asrPillTrack, asrPillTween, {BackgroundColor3 = Color3.fromRGB(60,60,60)}):Play()
+            V.TweenService:Create(asrKnob, asrPillTween, {Position = UDim2.new(0,2,0.5,-6), BackgroundColor3 = Color3.fromRGB(200,200,200)}):Play()
+            asrStateText.Text = "OFF"; asrStateText.TextColor3 = Color3.fromRGB(160,160,160)
+        end
+    end
+
+    asrToggleHitbox.MouseButton1Click:Connect(function()
+        V.asrEnabled_af = not V.asrEnabled_af
+        updateAsrPill(V.asrEnabled_af)
+        if V.asrEnabled_af then
+            asrRunLoop()
+        end
+    end)
+
+    -- cfg: Auto Scrap + Rebirth toggle
+    V.cfgRead["auto_scrap_rebirth"] = function()
+        return {en = V.asrEnabled_af}
+    end
+    V.cfgApply["auto_scrap_rebirth"] = function(t)
+        local wantOn = (t.en == true)
+        if V.asrEnabled_af ~= wantOn then
+            V.asrEnabled_af = wantOn
+            updateAsrPill(V.asrEnabled_af)
+            if V.asrEnabled_af then
+                asrRunLoop()
             end
         end
     end
