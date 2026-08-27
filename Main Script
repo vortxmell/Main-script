@@ -10093,6 +10093,8 @@ do -- === AUTO FARM (scoped) ===
     end
 
     local asrStartPos = nil
+    local scrapSpawned = false
+    local scrapDone = false
 
     local function comboRunLoop()
         if comboLoopRunning then return end
@@ -10118,6 +10120,42 @@ do -- === AUTO FARM (scoped) ===
                     end
                     local startPos = asrStartPos
 
+                    -- ═══ STEP 1(b): scan+collect scrap — START SERTA-MERTA
+                    -- lepas toggle ON, TAK payah tunggu level-check gate
+                    -- (myLevel >= rivalLevel) dulu. Jalan SEKALI je per
+                    -- cycle (guard scrapSpawned), serentak dgn gate check
+                    -- di bawah — climb Tower guna remote invoke sahaja,
+                    -- TAK gerakkan avatar secara fizikal, so avatar bebas
+                    -- collect scrap serentak macam sebelum ni.
+                    if not scrapSpawned then
+                        scrapSpawned = true
+                        scrapDone = false
+                        task.spawn(function()
+                            local collected = 0
+                            while V.comboEnabled_af and collected < ASR_TARGET_SCRAP do
+                                local scrap, scrapPos = acsGetNearestScrap(root)
+                                if not scrap then
+                                    task.wait(ASR_SCAN_RETRY_WAIT) -- takde scrap skrg, keep retry
+                                else
+                                    asrWalkTo(hum, root, scrapPos, ASR_WALK_TIMEOUT)
+                                    local t0 = tick()
+                                    while V.comboEnabled_af and scrap.Parent and (tick() - t0) < ASR_COLLECT_WAIT do
+                                        task.wait(0.1)
+                                    end
+                                    if not scrap.Parent then
+                                        collected = collected + 1
+                                    end
+                                end
+                            end
+                            print(string.format("[Combo] STEP 1(b) selesai: %d/%d scrap", collected, ASR_TARGET_SCRAP))
+                            if V.comboEnabled_af then
+                                asrWalkToPrecise(hum, root, startPos, ASR_WALK_TIMEOUT)
+                            end
+                            print("[Combo] STEP 1(b): dah balik start position — tunggu step 5")
+                            scrapDone = true
+                        end)
+                    end
+
                     local mods2 = atv2GetModules()
                     if not mods2 then
                         task.wait(AT3_CHECK_INTERVAL)
@@ -10140,35 +10178,9 @@ do -- === AUTO FARM (scoped) ===
                             if not canBeat and not alreadyAtGate then
                                 task.wait(AT3_CHECK_INTERVAL)
                             else
-                                -- ═══ STEP 1(b): scrap collection — SERENTAK
-                                -- dgn (a)/2/3/4 (task.spawn berasingan, sebab
-                                -- climb Tower guna remote invoke sahaja, TAK
-                                -- gerakkan avatar secara fizikal) ═══
-                                local scrapDone = false
-                                task.spawn(function()
-                                    local collected = 0
-                                    while V.comboEnabled_af and collected < ASR_TARGET_SCRAP do
-                                        local scrap, scrapPos = acsGetNearestScrap(root)
-                                        if not scrap then
-                                            task.wait(ASR_SCAN_RETRY_WAIT) -- takde scrap skrg, keep retry
-                                        else
-                                            asrWalkTo(hum, root, scrapPos, ASR_WALK_TIMEOUT)
-                                            local t0 = tick()
-                                            while V.comboEnabled_af and scrap.Parent and (tick() - t0) < ASR_COLLECT_WAIT do
-                                                task.wait(0.1)
-                                            end
-                                            if not scrap.Parent then
-                                                collected = collected + 1
-                                            end
-                                        end
-                                    end
-                                    print(string.format("[Combo] STEP 1(b) selesai: %d/%d scrap", collected, ASR_TARGET_SCRAP))
-                                    if V.comboEnabled_af then
-                                        asrWalkToPrecise(hum, root, startPos, ASR_WALK_TIMEOUT)
-                                    end
-                                    print("[Combo] STEP 1(b): dah balik start position — tunggu step 5")
-                                    scrapDone = true
-                                end)
+                                -- STEP 1(b) scrap collection dah start awal
+                                -- (di atas, serta-merta lepas toggle ON) —
+                                -- kat sini kita cuma sambung STEP 2+3+4.
 
                                 -- ═══ STEP 2+3+4: fire ke frontier, monitor
                                 -- climb (check tower floor xx=xx), retreat ═══
@@ -10256,6 +10268,11 @@ do -- === AUTO FARM (scoped) ===
                                         end
                                     end
                                 end
+
+                                -- Cycle penuh dah habis (atau gate skip terus
+                                -- sebab alreadyAtGate) — reset supaya STEP 1(b)
+                                -- start balik fresh untuk cycle seterusnya.
+                                scrapSpawned = false
                             end
                         end
                     end
