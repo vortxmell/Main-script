@@ -9999,6 +9999,11 @@ do -- === AUTO FARM (scoped) ===
     local ASR_DBLCLICK_MAX        = 0.85  -- saat — jeda max (<1s, macam double-click manual)
     local ASR_CONFIRM_TIMEOUT     = 8     -- saat max tunggu Tower best jadi 0 (step 8)
 
+    -- [RelPos] Offset scrap dropoff — captured relative kat coop punya
+    -- CFrame (bukan absolute world position), so PORTABLE walau apa-apa
+    -- plot/server pun (confirmed via Roblox Console capture).
+    local ASR_SCRAP_DROPOFF_OFFSET = Vector3.new(-5.715, 2.698, -22.107)
+
     V.comboEnabled_af = false
     local comboLoopRunning = false
 
@@ -10027,6 +10032,18 @@ do -- === AUTO FARM (scoped) ===
             if dist <= ASR_PRECISE_THRESHOLD then return true end
         end
         return false
+    end
+
+    -- [RelPos] Kira world position scrap dropoff dari offset yg dah
+    -- capture (ASR_SCRAP_DROPOFF_OFFSET), relative kat coop:GetPivot()
+    -- semasa — bukan startPos asal lagi. Fallback nil kalau coop tak
+    -- jumpa (caller kena handle fallback ke startPos).
+    local function asrGetScrapDropoffPos()
+        local coop = atGetMyCoop()
+        if not coop then return nil end
+        local ok, coopCF = pcall(function() return coop:GetPivot() end)
+        if not ok or not coopCF then return nil end
+        return coopCF:PointToWorldSpace(ASR_SCRAP_DROPOFF_OFFSET)
     end
 
     -- Containment check betul-betul "dalam" coop (bukan sekadar dekat
@@ -10173,10 +10190,13 @@ do -- === AUTO FARM (scoped) ===
                                         -- lagi next iteration, tak kira pickup ni jadi ke tak)
                                     end
                                 else
-                                    -- Stack dah cukup 15 — mula walk balik start position,
-                                    -- TAPI verify count tu still 15 SEPANJANG perjalanan.
-                                    print(string.format("[Combo] STEP 1(b): Stack cukup %d/%d — walk balik start position", stackCount, ASR_TARGET_SCRAP))
-                                    hum:MoveTo(startPos)
+                                    -- Stack dah cukup 15 — mula walk pergi captured
+                                    -- dropoff position (RelPos offset dari coop,
+                                    -- BUKAN startPos asal lagi), TAPI verify count
+                                    -- tu still 15 SEPANJANG perjalanan.
+                                    local dropoffPos = asrGetScrapDropoffPos() or startPos
+                                    print(string.format("[Combo] STEP 1(b): Stack cukup %d/%d — walk pergi captured dropoff position", stackCount, ASR_TARGET_SCRAP))
+                                    hum:MoveTo(dropoffPos)
                                     local arrived = false
                                     local conn
                                     conn = hum.MoveToFinished:Connect(function() arrived = true end)
@@ -10197,12 +10217,14 @@ do -- === AUTO FARM (scoped) ===
                                     elseif V.comboEnabled_af then
                                         -- Sampai (atau timeout) — precise-walk finishing touch
                                         -- macam sebelum ni, then confirm count sekali lagi.
-                                        asrWalkToPrecise(hum, root, startPos, ASR_WALK_TIMEOUT)
+                                        -- Re-fetch dropoffPos (bukan reuse var basi) sebab
+                                        -- precise-retry loop boleh ambil masa.
+                                        asrWalkToPrecise(hum, root, asrGetScrapDropoffPos() or dropoffPos, ASR_WALK_TIMEOUT)
                                         if asrGetScrapStackCount() >= ASR_TARGET_SCRAP then
-                                            print(string.format("[Combo] STEP 1(b) selesai: %d/%d scrap, dah sampai start position — tunggu step 5", asrGetScrapStackCount(), ASR_TARGET_SCRAP))
+                                            print(string.format("[Combo] STEP 1(b) selesai: %d/%d scrap, dah sampai dropoff position — tunggu step 5", asrGetScrapStackCount(), ASR_TARGET_SCRAP))
                                             scrapDone = true
                                         else
-                                            print("[Combo] STEP 1(b): sampai start tapi stack < 15 — sambung collect")
+                                            print("[Combo] STEP 1(b): sampai dropoff tapi stack < 15 — sambung collect")
                                             -- loop atas ulang, balik ke branch collect
                                         end
                                     end
