@@ -9321,15 +9321,10 @@ do -- === AUTO FARM (scoped) ===
     --   3. Setiap iteration, check WalkSpeed player DULU sebelum
     --      cari scrap — kalau dah turun ke <= 5.6 (mechanic game:
     --      makin banyak scrap collect, makin slow), terus walk ke
-    --      Recycler MILIK PLOT KITA SENDIRI utk recycle & speed restore.
+    --      workspace.Recyclers.Recycler1 utk recycle & speed restore.
     --   4. Lepas recycle, ulang balik dari step 1.
-    -- FIX: ACS_RECYCLER_PATH[2] ("Recycler1") HANYA fallback — Recycler
-    -- SEBENAR tergantung plot player (Coop2 -> Recycler2, Coop7 ->
-    -- Recycler7, dll — beza tiap kali join/hop server). acsGetRecyclerPos()
-    -- baca Player.Plot attribute LIVE dan bina nama "Recycler"..plot
-    -- dinamik, bukan hardcode "Recycler1".
     local ACS_SCRAP_FOLDER    = "PitScrap"
-    local ACS_RECYCLER_PATH   = {"Recyclers", "Recycler1"} -- [2] fallback je, lihat acsGetRecyclerPos()
+    local ACS_RECYCLER_PATH   = {"Recyclers", "Recycler1"}
     local ACS_SPEED_THRESHOLD = 5.6  -- WalkSpeed <= ni → pergi recycle
     local ACS_WALK_TIMEOUT    = 15   -- saat; safety kalau MoveToFinished tak fire
     local ACS_COLLECT_WAIT    = 2    -- saat; confirm scrap dah collect (Parent hilang)
@@ -9378,22 +9373,10 @@ do -- === AUTO FARM (scoped) ===
         return best, bestPos
     end
 
-    -- FIX: guna Player.Plot attribute LIVE (SAMA pattern reliable macam
-    -- atGetMyCoop(), inline di sini sebab function tu didefine LEPAS baris
-    -- ni dlm file — Lua scoping tak boleh forward-reference) untuk bina
-    -- nama Recycler dinamik. Elak hardcode "Recycler1" yg salah bila plot
-    -- kita bukan 1 (cth Coop2/Coop7/Coop4 — beza tiap join/hop server).
     local function acsGetRecyclerPos()
-        local recyclersFolder = workspace:FindFirstChild(ACS_RECYCLER_PATH[1])
-        if not recyclersFolder then return nil end
-        local plot = V.LocalPlayer:GetAttribute("Plot")
-        local recyclerName = plot and ("Recycler" .. tostring(plot)) or ACS_RECYCLER_PATH[2]
-        local node = recyclersFolder:FindFirstChild(recyclerName)
-        if not node and plot then
-            -- Fallback kalau nama "Recycler"..plot tak jumpa (cth struktur
-            -- lain dari jangkaan) — cuba fallback name asal supaya tak
-            -- terus gagal total.
-            node = recyclersFolder:FindFirstChild(ACS_RECYCLER_PATH[2])
+        local node = workspace
+        for _, name in ipairs(ACS_RECYCLER_PATH) do
+            node = node and node:FindFirstChild(name)
         end
         return node and acsGetPos(node)
     end
@@ -9749,7 +9732,7 @@ do -- === AUTO FARM (scoped) ===
     -- di floor tu (TowerFloor.at(floor).level, confirmed dari Stats Info
     -- panel — sumber SAMA yang papar "Floor X: chicken level Y"). Tak
     -- perlu HP, tak perlu ATK, tak perlu previewStats/Curve formula apa-apa.
-    local AT3_LEVEL_MARGIN = 15 -- default; dikemaskini dari inputbox UI
+    local AT3_LEVEL_MARGIN = 15 -- chicken kita kena LEBIH level ni drpd rival sebelum fire
 
     -- Pulangkan: canBeat (bool|nil), myLevel, rivalLevel
     local function atv3CanBeatFloor(mods2, floorToCheck, debugPrint)
@@ -9847,20 +9830,12 @@ do -- === AUTO FARM (scoped) ===
                         -- Target (gate rebirth) dah capai, takde apa nak climb lagi buat masa ni.
                         task.wait(AT3_CHECK_INTERVAL)
                     else
-                        -- REVISI (confirmed by Mel): compare LEVEL terhadap
-                        -- requirementFloor (gate rebirth — floor PALING SUSAH
-                        -- yg perlu dikalahkan), BUKAN frontierFloor. Sebab:
-                        -- difficulty naik ikut floor number, so kalau chicken
-                        -- kita boleh kalahkan rival di requirementFloor
-                        -- (paling susah), automatik boleh kalahkan semua
-                        -- floor pertengahan (towerBest+1 sampai
-                        -- requirementFloor) — cukup check SEKALI je, tak
-                        -- payah re-check floor demi floor semasa climb naik.
-                        -- (frontierFloor tetap dikira & dipakai sebagai
-                        -- ARGUMENT warp elevator — tak berkaitan dgn level
-                        -- check, cuma destinasi teleport.)
+                        -- PENTING: compare stats terhadap frontierFloor (floor
+                        -- SEBENAR yg akan difight = towerBest+1), BUKAN
+                        -- requirementFloor (gate rebirth threshold, floor
+                        -- lain sama sekali — punca rival stats salah sebelum ni).
                         local frontierFloor = towerBest + 1
-                        local canBeat = atv3CanBeatFloor(mods2, requirementFloor)
+                        local canBeat = atv3CanBeatFloor(mods2, frontierFloor)
                         if canBeat then
                             local fired = atv2FireStraightToFrontier(frontierFloor)
                             if fired then
@@ -9907,14 +9882,16 @@ do -- === AUTO FARM (scoped) ===
                     local requirementFloor = atv2GetRequirementFloor(mods2)
                     local towerBest = atv2GetTowerBest(mods2)
                     if requirementFloor and towerBest then
-                        -- Papar stats terhadap requirementFloor (SAMA floor
-                        -- yg logic fire guna sekarang — bukan frontierFloor).
+                        -- Papar stats terhadap frontierFloor (floor SEBENAR
+                        -- akan difight = towerBest+1) — sama floor yg logic
+                        -- fire guna, bukan requirementFloor (gate rebirth).
+                        local frontierFloor = towerBest + 1
                         local canBeat, myLevel, rivalLevel =
-                            atv3CanBeatFloor(mods2, requirementFloor, wantDebug)
+                            atv3CanBeatFloor(mods2, frontierFloor, wantDebug)
                         if myLevel then
                             atv3StatusLbl.Text = string.format(
                                 "Level: my %d vs rival %d (need +%d) floor %d",
-                                myLevel, rivalLevel, AT3_LEVEL_MARGIN, requirementFloor)
+                                myLevel, rivalLevel, AT3_LEVEL_MARGIN, frontierFloor)
                             atv3StatusLbl.TextColor3 = canBeat
                                 and Color3.fromRGB(120, 255, 120)
                                 or  Color3.fromRGB(200, 200, 200)
@@ -9938,7 +9915,6 @@ do -- === AUTO FARM (scoped) ===
     end)
 
     -- ── Auto Tower: Stats toggle (y=102) ─────────────────────────────
-    local atv3MarginBox = nil -- forward declare; assigned in Level Margin inputbox block below
     local atv3Row = Instance.new("Frame")
     atv3Row.Size = UDim2.new(1, -8, 0, 22)
     atv3Row.Position = UDim2.new(0, 4, 0, 102)
@@ -10014,13 +9990,9 @@ do -- === AUTO FARM (scoped) ===
 
     -- cfg: Auto Tower: Stats toggle
     V.cfgRead["auto_tower_stats"] = function()
-        return {en = V.autoTowerV3Enabled_af, margin = AT3_LEVEL_MARGIN}
+        return {en = V.autoTowerV3Enabled_af}
     end
     V.cfgApply["auto_tower_stats"] = function(t)
-        if t.margin and tonumber(t.margin) then
-            AT3_LEVEL_MARGIN = math.max(0, math.floor(tonumber(t.margin)))
-            if atv3MarginBox then atv3MarginBox.Text = tostring(AT3_LEVEL_MARGIN) end
-        end
         local wantOn = (t.en == true)
         if V.autoTowerV3Enabled_af ~= wantOn then
             V.autoTowerV3Enabled_af = wantOn
@@ -10029,47 +10001,6 @@ do -- === AUTO FARM (scoped) ===
                 autoTowerV3RunLoop()
             end
         end
-    end
-
-    -- Level Margin inputbox (di bawah AT3 toggle row)
-    do
-        local atv3MarginRow = Instance.new("Frame")
-        atv3MarginRow.Size               = UDim2.new(1, -8, 0, 18)
-        atv3MarginRow.Position           = UDim2.new(0, 4, 0, atv3Row.Position.Y.Offset + 26)
-        atv3MarginRow.BackgroundTransparency = 1
-        atv3MarginRow.Parent             = atv3Row.Parent
-
-        local atv3MarginLbl = Instance.new("TextLabel")
-        atv3MarginLbl.Size             = UDim2.new(0.6, 0, 1, 0)
-        atv3MarginLbl.BackgroundTransparency = 1
-        atv3MarginLbl.Text             = "Level Margin (+)"
-        atv3MarginLbl.TextColor3       = Color3.fromRGB(160, 160, 160)
-        atv3MarginLbl.TextSize         = 9
-        atv3MarginLbl.Font             = Enum.Font.Gotham
-        atv3MarginLbl.TextXAlignment   = Enum.TextXAlignment.Left
-        atv3MarginLbl.Parent           = atv3MarginRow
-
-        atv3MarginBox = Instance.new("TextBox")
-        atv3MarginBox.Size             = UDim2.new(0.35, 0, 1, 0)
-        atv3MarginBox.Position         = UDim2.new(0.62, 0, 0, 0)
-        atv3MarginBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-        atv3MarginBox.BorderSizePixel  = 0
-        atv3MarginBox.Text             = tostring(AT3_LEVEL_MARGIN)
-        atv3MarginBox.TextColor3       = Color3.fromRGB(255, 255, 255)
-        atv3MarginBox.PlaceholderText  = "15"
-        atv3MarginBox.PlaceholderColor3 = Color3.fromRGB(80, 80, 80)
-        atv3MarginBox.TextSize         = 9
-        atv3MarginBox.Font             = Enum.Font.Gotham
-        atv3MarginBox.TextXAlignment   = Enum.TextXAlignment.Center
-        atv3MarginBox.ClearTextOnFocus = false
-        atv3MarginBox.Parent           = atv3MarginRow
-        do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0,3); c.Parent = atv3MarginBox end
-
-        atv3MarginBox.FocusLost:Connect(function()
-            local n = tonumber(atv3MarginBox.Text)
-            AT3_LEVEL_MARGIN = (n and n >= 0) and math.floor(n) or 15
-            atv3MarginBox.Text = tostring(AT3_LEVEL_MARGIN)
-        end)
     end
 
     -- ═══ Auto Scrap + Rebirth (y=124) ═══════════════════════════════
@@ -10288,38 +10219,11 @@ do -- === AUTO FARM (scoped) ===
                             while V.asrEnabled_af and (tick() - t0) < ASR_MONEY_WAIT_TIMEOUT do
                                 local moneyNow = asrGetMoney()
                                 if moneyBefore and moneyNow and moneyNow > moneyBefore then
-                                    print(string.format("[ASR] STEP 7: Money masuk %s -> %s — SPAM FIRE REBIRTH sampai level reset", tostring(moneyBefore), tostring(moneyNow)))
-                                    fired = true
-
-                                    -- FIX: spam fire rebirth sampai level betul2 reset
-                                    -- (detect level drop balik ke 1 sebagai confirm rebirth jadi)
-                                    local RS2 = game:GetService("ReplicatedStorage")
-                                    local spamT0 = tick()
-                                    local SPAM_TIMEOUT = 8 -- saat max spam
-                                    local levelBefore = nil
+                                    print(string.format("[ASR] STEP 7: Money masuk %s -> %s — FIRE REBIRTH", tostring(moneyBefore), tostring(moneyNow)))
                                     pcall(function()
-                                        local DC = require(V.LocalPlayer:WaitForChild("PlayerScripts").Core.Data.DataController)
-                                        levelBefore = DC.level and DC.level() or nil
+                                        game:GetService("ReplicatedStorage").Remotes.Rebirth:InvokeServer()
                                     end)
-                                    while V.asrEnabled_af and (tick() - spamT0) < SPAM_TIMEOUT do
-                                        pcall(function()
-                                            RS2.Remotes.Rebirth:InvokeServer()
-                                        end)
-                                        -- Check level reset sebagai confirm rebirth berjaya
-                                        local rebirthDone = false
-                                        pcall(function()
-                                            local DC = require(V.LocalPlayer:WaitForChild("PlayerScripts").Core.Data.DataController)
-                                            local lvlNow = DC.level and DC.level() or nil
-                                            if levelBefore and lvlNow and lvlNow < levelBefore then
-                                                rebirthDone = true
-                                            end
-                                        end)
-                                        if rebirthDone then
-                                            print("[ASR] STEP 7: Rebirth confirmed (level reset) — stop spam")
-                                            break
-                                        end
-                                        task.wait(0.05)
-                                    end
+                                    fired = true
                                     break
                                 end
                                 task.wait(ASR_MONEY_POLL_INTERVAL)
