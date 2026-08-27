@@ -10097,12 +10097,19 @@ do -- === AUTO FARM (scoped) ===
     local scrapDone = false
 
     -- Live count scrap yang betul-betul dah stack atas kepala chicken
-    -- (workspace.Thexmell.Head.ScrapStack.Stack) — source of truth
-    -- SEBENAR utk "dah cukup 15 ke belum", bukan sekadar counter
-    -- manual (yang boleh silap kalau pickup gagal/race condition).
+    -- (Character.Head.ScrapStack.Stack) — source of truth SEBENAR utk
+    -- "dah cukup 15 ke belum", bukan sekadar counter manual (yang boleh
+    -- silap kalau pickup gagal/race condition).
+    -- FIX BUG: sebelum ni hardcode "workspace.Thexmell..." (huruf kecil)
+    -- — Roblox instance indexing case-sensitive, username sebenar
+    -- "TheXmell" (capital X/M) TAK MATCH "Thexmell", jadi pcall
+    -- SENYAP gagal setiap kali, function ni asyik return 0, loop
+    -- ingat tak cukup 15 SELAMA-LAMANYA -> collect non-stop. Fix:
+    -- guna LocalPlayer.Character terus (dinamik, tak bergantung nama).
     local function asrGetScrapStackCount()
         local ok, stack = pcall(function()
-            return workspace.Thexmell.Head.ScrapStack.Stack
+            local char = V.LocalPlayer.Character
+            return char and char.Head.ScrapStack.Stack
         end)
         if ok and stack then
             return #stack:GetChildren()
