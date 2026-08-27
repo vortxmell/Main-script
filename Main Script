@@ -10096,6 +10096,20 @@ do -- === AUTO FARM (scoped) ===
     local scrapSpawned = false
     local scrapDone = false
 
+    -- Live count scrap yang betul-betul dah stack atas kepala chicken
+    -- (workspace.Thexmell.Head.ScrapStack.Stack) — source of truth
+    -- SEBENAR utk "dah cukup 15 ke belum", bukan sekadar counter
+    -- manual (yang boleh silap kalau pickup gagal/race condition).
+    local function asrGetScrapStackCount()
+        local ok, stack = pcall(function()
+            return workspace.Thexmell.Head.ScrapStack.Stack
+        end)
+        if ok and stack then
+            return #stack:GetChildren()
+        end
+        return 0
+    end
+
     local function comboRunLoop()
         if comboLoopRunning then return end
         comboLoopRunning = true
@@ -10131,28 +10145,58 @@ do -- === AUTO FARM (scoped) ===
                         scrapSpawned = true
                         scrapDone = false
                         task.spawn(function()
-                            local collected = 0
-                            while V.comboEnabled_af and collected < ASR_TARGET_SCRAP do
-                                local scrap, scrapPos = acsGetNearestScrap(root)
-                                if not scrap then
-                                    task.wait(ASR_SCAN_RETRY_WAIT) -- takde scrap skrg, keep retry
+                            while V.comboEnabled_af and not scrapDone do
+                                local stackCount = asrGetScrapStackCount()
+                                if stackCount < ASR_TARGET_SCRAP then
+                                    -- Belum cukup 15 dalam Stack — sambung collect.
+                                    local scrap, scrapPos = acsGetNearestScrap(root)
+                                    if not scrap then
+                                        task.wait(ASR_SCAN_RETRY_WAIT) -- takde scrap skrg, keep retry
+                                    else
+                                        asrWalkTo(hum, root, scrapPos, ASR_WALK_TIMEOUT)
+                                        local t0 = tick()
+                                        while V.comboEnabled_af and scrap.Parent and (tick() - t0) < ASR_COLLECT_WAIT do
+                                            task.wait(0.1)
+                                        end
+                                        -- (loop atas akan re-check asrGetScrapStackCount()
+                                        -- lagi next iteration, tak kira pickup ni jadi ke tak)
+                                    end
                                 else
-                                    asrWalkTo(hum, root, scrapPos, ASR_WALK_TIMEOUT)
+                                    -- Stack dah cukup 15 — mula walk balik start position,
+                                    -- TAPI verify count tu still 15 SEPANJANG perjalanan.
+                                    print(string.format("[Combo] STEP 1(b): Stack cukup %d/%d — walk balik start position", stackCount, ASR_TARGET_SCRAP))
+                                    hum:MoveTo(startPos)
+                                    local arrived = false
+                                    local conn
+                                    conn = hum.MoveToFinished:Connect(function() arrived = true end)
                                     local t0 = tick()
-                                    while V.comboEnabled_af and scrap.Parent and (tick() - t0) < ASR_COLLECT_WAIT do
+                                    local dropped = false
+                                    while V.comboEnabled_af and not arrived and (tick() - t0) < ASR_WALK_TIMEOUT do
+                                        if asrGetScrapStackCount() < ASR_TARGET_SCRAP then
+                                            dropped = true
+                                            break
+                                        end
                                         task.wait(0.1)
                                     end
-                                    if not scrap.Parent then
-                                        collected = collected + 1
+                                    if conn.Connected then conn:Disconnect() end
+
+                                    if dropped then
+                                        print("[Combo] STEP 1(b): Stack drop < 15 semasa dalam perjalanan — sambung collect balik")
+                                        -- loop atas ulang, balik ke branch collect
+                                    elseif V.comboEnabled_af then
+                                        -- Sampai (atau timeout) — precise-walk finishing touch
+                                        -- macam sebelum ni, then confirm count sekali lagi.
+                                        asrWalkToPrecise(hum, root, startPos, ASR_WALK_TIMEOUT)
+                                        if asrGetScrapStackCount() >= ASR_TARGET_SCRAP then
+                                            print(string.format("[Combo] STEP 1(b) selesai: %d/%d scrap, dah sampai start position — tunggu step 5", asrGetScrapStackCount(), ASR_TARGET_SCRAP))
+                                            scrapDone = true
+                                        else
+                                            print("[Combo] STEP 1(b): sampai start tapi stack < 15 — sambung collect")
+                                            -- loop atas ulang, balik ke branch collect
+                                        end
                                     end
                                 end
                             end
-                            print(string.format("[Combo] STEP 1(b) selesai: %d/%d scrap", collected, ASR_TARGET_SCRAP))
-                            if V.comboEnabled_af then
-                                asrWalkToPrecise(hum, root, startPos, ASR_WALK_TIMEOUT)
-                            end
-                            print("[Combo] STEP 1(b): dah balik start position — tunggu step 5")
-                            scrapDone = true
                         end)
                     end
 
