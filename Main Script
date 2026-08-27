@@ -9321,10 +9321,15 @@ do -- === AUTO FARM (scoped) ===
     --   3. Setiap iteration, check WalkSpeed player DULU sebelum
     --      cari scrap — kalau dah turun ke <= 5.6 (mechanic game:
     --      makin banyak scrap collect, makin slow), terus walk ke
-    --      workspace.Recyclers.Recycler1 utk recycle & speed restore.
+    --      Recycler MILIK PLOT KITA SENDIRI utk recycle & speed restore.
     --   4. Lepas recycle, ulang balik dari step 1.
+    -- FIX: ACS_RECYCLER_PATH[2] ("Recycler1") HANYA fallback — Recycler
+    -- SEBENAR tergantung plot player (Coop2 -> Recycler2, Coop7 ->
+    -- Recycler7, dll — beza tiap kali join/hop server). acsGetRecyclerPos()
+    -- baca Player.Plot attribute LIVE dan bina nama "Recycler"..plot
+    -- dinamik, bukan hardcode "Recycler1".
     local ACS_SCRAP_FOLDER    = "PitScrap"
-    local ACS_RECYCLER_PATH   = {"Recyclers", "Recycler1"}
+    local ACS_RECYCLER_PATH   = {"Recyclers", "Recycler1"} -- [2] fallback je, lihat acsGetRecyclerPos()
     local ACS_SPEED_THRESHOLD = 5.6  -- WalkSpeed <= ni → pergi recycle
     local ACS_WALK_TIMEOUT    = 15   -- saat; safety kalau MoveToFinished tak fire
     local ACS_COLLECT_WAIT    = 2    -- saat; confirm scrap dah collect (Parent hilang)
@@ -9373,10 +9378,22 @@ do -- === AUTO FARM (scoped) ===
         return best, bestPos
     end
 
+    -- FIX: guna Player.Plot attribute LIVE (SAMA pattern reliable macam
+    -- atGetMyCoop(), inline di sini sebab function tu didefine LEPAS baris
+    -- ni dlm file — Lua scoping tak boleh forward-reference) untuk bina
+    -- nama Recycler dinamik. Elak hardcode "Recycler1" yg salah bila plot
+    -- kita bukan 1 (cth Coop2/Coop7/Coop4 — beza tiap join/hop server).
     local function acsGetRecyclerPos()
-        local node = workspace
-        for _, name in ipairs(ACS_RECYCLER_PATH) do
-            node = node and node:FindFirstChild(name)
+        local recyclersFolder = workspace:FindFirstChild(ACS_RECYCLER_PATH[1])
+        if not recyclersFolder then return nil end
+        local plot = V.LocalPlayer:GetAttribute("Plot")
+        local recyclerName = plot and ("Recycler" .. tostring(plot)) or ACS_RECYCLER_PATH[2]
+        local node = recyclersFolder:FindFirstChild(recyclerName)
+        if not node and plot then
+            -- Fallback kalau nama "Recycler"..plot tak jumpa (cth struktur
+            -- lain dari jangkaan) — cuba fallback name asal supaya tak
+            -- terus gagal total.
+            node = recyclersFolder:FindFirstChild(ACS_RECYCLER_PATH[2])
         end
         return node and acsGetPos(node)
     end
@@ -9830,12 +9847,20 @@ do -- === AUTO FARM (scoped) ===
                         -- Target (gate rebirth) dah capai, takde apa nak climb lagi buat masa ni.
                         task.wait(AT3_CHECK_INTERVAL)
                     else
-                        -- PENTING: compare stats terhadap frontierFloor (floor
-                        -- SEBENAR yg akan difight = towerBest+1), BUKAN
-                        -- requirementFloor (gate rebirth threshold, floor
-                        -- lain sama sekali — punca rival stats salah sebelum ni).
+                        -- REVISI (confirmed by Mel): compare LEVEL terhadap
+                        -- requirementFloor (gate rebirth — floor PALING SUSAH
+                        -- yg perlu dikalahkan), BUKAN frontierFloor. Sebab:
+                        -- difficulty naik ikut floor number, so kalau chicken
+                        -- kita boleh kalahkan rival di requirementFloor
+                        -- (paling susah), automatik boleh kalahkan semua
+                        -- floor pertengahan (towerBest+1 sampai
+                        -- requirementFloor) — cukup check SEKALI je, tak
+                        -- payah re-check floor demi floor semasa climb naik.
+                        -- (frontierFloor tetap dikira & dipakai sebagai
+                        -- ARGUMENT warp elevator — tak berkaitan dgn level
+                        -- check, cuma destinasi teleport.)
                         local frontierFloor = towerBest + 1
-                        local canBeat = atv3CanBeatFloor(mods2, frontierFloor)
+                        local canBeat = atv3CanBeatFloor(mods2, requirementFloor)
                         if canBeat then
                             local fired = atv2FireStraightToFrontier(frontierFloor)
                             if fired then
@@ -9882,16 +9907,14 @@ do -- === AUTO FARM (scoped) ===
                     local requirementFloor = atv2GetRequirementFloor(mods2)
                     local towerBest = atv2GetTowerBest(mods2)
                     if requirementFloor and towerBest then
-                        -- Papar stats terhadap frontierFloor (floor SEBENAR
-                        -- akan difight = towerBest+1) — sama floor yg logic
-                        -- fire guna, bukan requirementFloor (gate rebirth).
-                        local frontierFloor = towerBest + 1
+                        -- Papar stats terhadap requirementFloor (SAMA floor
+                        -- yg logic fire guna sekarang — bukan frontierFloor).
                         local canBeat, myLevel, rivalLevel =
-                            atv3CanBeatFloor(mods2, frontierFloor, wantDebug)
+                            atv3CanBeatFloor(mods2, requirementFloor, wantDebug)
                         if myLevel then
                             atv3StatusLbl.Text = string.format(
                                 "Level: my %d vs rival %d (need +%d) floor %d",
-                                myLevel, rivalLevel, AT3_LEVEL_MARGIN, frontierFloor)
+                                myLevel, rivalLevel, AT3_LEVEL_MARGIN, requirementFloor)
                             atv3StatusLbl.TextColor3 = canBeat
                                 and Color3.fromRGB(120, 255, 120)
                                 or  Color3.fromRGB(200, 200, 200)
