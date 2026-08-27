@@ -9737,46 +9737,31 @@ do -- === AUTO FARM (scoped) ===
 
     -- Reuse atGetMyCoop() (dah wujud atas, dari Auto Tower V1) untuk cari
     -- plot/ChickenBody yg sama — elak duplicate logic pencarian coop.
-    -- Pulangkan: level (number|nil), reason (string, hanya kalau gagal)
     local function atv3GetMyLevel()
         local _, plot = atGetMyCoop()
-        if not plot then return nil, "plot attribute tak jumpa" end
+        if not plot then return nil end
         local bodies = workspace:FindFirstChild("ChickenBodies")
-        if not bodies then return nil, "workspace.ChickenBodies tak jumpa" end
-        local matchedAny = false
+        if not bodies then return nil end
         for _, body in ipairs(bodies:GetChildren()) do
             if body.Name:find("coop:" .. tostring(plot), 1, true) then
-                matchedAny = true
-                -- Guna FindFirstChild(name, true) — RECURSIVE search, cari
-                -- node "lvl" di MANA-MANA dalam BillboardGui, tak kira
-                -- struktur nested (path tetap "canvas.text.lvl" rupanya
-                -- tak consistent merentasi jenis/tahap chicken berbeza).
-                local billboard = body:FindFirstChildOfClass("BillboardGui")
-                if not billboard then return nil, ("BillboardGui tak jumpa (body=%s)"):format(body.Name) end
-                local lvlNode = billboard:FindFirstChild("lvl", true)
-                if not lvlNode then return nil, ("lvl node tak jumpa recursive (body=%s)"):format(body.Name) end
-                local lvlText = lvlNode:IsA("TextLabel") and lvlNode.Text or nil
-                if not lvlText then return nil, "lvl node bukan TextLabel/Text kosong" end
-                local n = tonumber((lvlText:gsub("%D", "")))
-                if n then return n end
-                return nil, ("gagal parse angka dari %q"):format(lvlText)
+                local lvlNode = atSafeNavigate(body, "BillboardGui", "Frame", "canvas", "text", "lvl")
+                local lvlText = lvlNode and lvlNode:IsA("TextLabel") and lvlNode.Text or nil
+                if lvlText then
+                    local n = tonumber((lvlText:gsub("%D", "")))
+                    if n then return n end
+                end
             end
         end
-        if not matchedAny then
-            return nil, ("takde ChickenBody match 'coop:%s' (plot=%s)"):format(tostring(plot), tostring(plot))
-        end
-        return nil, "unknown"
+        return nil
     end
 
-    -- Pulangkan: canBeat (bool|nil), myLevel, rivalLevel, reason (kalau gagal)
+    -- Pulangkan: canBeat (bool|nil), myLevel, rivalLevel
     local function atv3CanBeatFloor(mods2, targetFloor)
-        local myLevel, reason = atv3GetMyLevel()
-        if not myLevel then return nil, nil, nil, "myLevel: " .. tostring(reason) end
+        local myLevel = atv3GetMyLevel()
+        if not myLevel then return nil end
 
         local ok, flData = pcall(function() return mods2.TowerFloor.at(targetFloor) end)
-        if not ok then return nil, myLevel, nil, "TowerFloor.at() error: " .. tostring(flData) end
-        if not flData then return nil, myLevel, nil, "TowerFloor.at() pulang nil" end
-        if not flData.level then return nil, myLevel, nil, "flData.level tak wujud" end
+        if not ok or not flData or not flData.level then return nil end
         local rivalLevel = flData.level
 
         local canBeat = myLevel >= (rivalLevel + AT3_LEVEL_MARGIN)
@@ -9907,7 +9892,7 @@ do -- === AUTO FARM (scoped) ===
                         -- difight = towerBest+1) — sama floor yg logic fire
                         -- guna, bukan requirementFloor (gate rebirth).
                         local frontierFloor = towerBest + 1
-                        local canBeat, myLevel, rivalLevel, reason = atv3CanBeatFloor(mods2, frontierFloor)
+                        local canBeat, myLevel, rivalLevel = atv3CanBeatFloor(mods2, frontierFloor)
                         if myLevel and rivalLevel then
                             atv3StatusLbl.Text = string.format(
                                 "Level: my %d vs rival %d (floor %d, need +%d)",
@@ -9916,21 +9901,17 @@ do -- === AUTO FARM (scoped) ===
                                 and Color3.fromRGB(120, 255, 120)
                                 or  Color3.fromRGB(200, 200, 200)
                         else
-                            atv3StatusLbl.Text = "Level: FAIL - " .. tostring(reason)
-                            atv3StatusLbl.TextColor3 = Color3.fromRGB(255, 120, 120)
+                            atv3StatusLbl.Text = "Level: my -- vs rival --"
                         end
                     else
-                        atv3StatusLbl.Text = "Level: FAIL - towerBest tak jumpa (atv2GetTowerBest gagal)"
-                        atv3StatusLbl.TextColor3 = Color3.fromRGB(255, 120, 120)
+                        atv3StatusLbl.Text = "Level: my -- vs rival --"
                     end
                 else
-                    atv3StatusLbl.Text = "Level: FAIL - mods2 nil (atv2GetModules gagal, require() error)"
-                    atv3StatusLbl.TextColor3 = Color3.fromRGB(255, 120, 120)
+                    atv3StatusLbl.Text = "Level: my -- vs rival --"
                 end
             end)
             if not ok then
-                atv3StatusLbl.Text = "Level: FAIL - error luar jangka (pcall gagal)"
-                atv3StatusLbl.TextColor3 = Color3.fromRGB(255, 120, 120)
+                atv3StatusLbl.Text = "Level: my -- vs rival --"
             end
         end
     end)
