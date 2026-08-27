@@ -9749,7 +9749,7 @@ do -- === AUTO FARM (scoped) ===
     -- di floor tu (TowerFloor.at(floor).level, confirmed dari Stats Info
     -- panel — sumber SAMA yang papar "Floor X: chicken level Y"). Tak
     -- perlu HP, tak perlu ATK, tak perlu previewStats/Curve formula apa-apa.
-    local AT3_LEVEL_MARGIN = 15 -- chicken kita kena LEBIH level ni drpd rival sebelum fire
+    local AT3_LEVEL_MARGIN = 15 -- default; dikemaskini dari inputbox UI
 
     -- Pulangkan: canBeat (bool|nil), myLevel, rivalLevel
     local function atv3CanBeatFloor(mods2, floorToCheck, debugPrint)
@@ -9938,6 +9938,7 @@ do -- === AUTO FARM (scoped) ===
     end)
 
     -- ── Auto Tower: Stats toggle (y=102) ─────────────────────────────
+    local atv3MarginBox = nil -- forward declare; assigned in Level Margin inputbox block below
     local atv3Row = Instance.new("Frame")
     atv3Row.Size = UDim2.new(1, -8, 0, 22)
     atv3Row.Position = UDim2.new(0, 4, 0, 102)
@@ -10013,9 +10014,13 @@ do -- === AUTO FARM (scoped) ===
 
     -- cfg: Auto Tower: Stats toggle
     V.cfgRead["auto_tower_stats"] = function()
-        return {en = V.autoTowerV3Enabled_af}
+        return {en = V.autoTowerV3Enabled_af, margin = AT3_LEVEL_MARGIN}
     end
     V.cfgApply["auto_tower_stats"] = function(t)
+        if t.margin and tonumber(t.margin) then
+            AT3_LEVEL_MARGIN = math.max(0, math.floor(tonumber(t.margin)))
+            if atv3MarginBox then atv3MarginBox.Text = tostring(AT3_LEVEL_MARGIN) end
+        end
         local wantOn = (t.en == true)
         if V.autoTowerV3Enabled_af ~= wantOn then
             V.autoTowerV3Enabled_af = wantOn
@@ -10024,6 +10029,47 @@ do -- === AUTO FARM (scoped) ===
                 autoTowerV3RunLoop()
             end
         end
+    end
+
+    -- Level Margin inputbox (di bawah AT3 toggle row)
+    do
+        local atv3MarginRow = Instance.new("Frame")
+        atv3MarginRow.Size               = UDim2.new(1, -8, 0, 18)
+        atv3MarginRow.Position           = UDim2.new(0, 4, 0, atv3Row.Position.Y.Offset + 26)
+        atv3MarginRow.BackgroundTransparency = 1
+        atv3MarginRow.Parent             = atv3Row.Parent
+
+        local atv3MarginLbl = Instance.new("TextLabel")
+        atv3MarginLbl.Size             = UDim2.new(0.6, 0, 1, 0)
+        atv3MarginLbl.BackgroundTransparency = 1
+        atv3MarginLbl.Text             = "Level Margin (+)"
+        atv3MarginLbl.TextColor3       = Color3.fromRGB(160, 160, 160)
+        atv3MarginLbl.TextSize         = 9
+        atv3MarginLbl.Font             = Enum.Font.Gotham
+        atv3MarginLbl.TextXAlignment   = Enum.TextXAlignment.Left
+        atv3MarginLbl.Parent           = atv3MarginRow
+
+        atv3MarginBox = Instance.new("TextBox")
+        atv3MarginBox.Size             = UDim2.new(0.35, 0, 1, 0)
+        atv3MarginBox.Position         = UDim2.new(0.62, 0, 0, 0)
+        atv3MarginBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        atv3MarginBox.BorderSizePixel  = 0
+        atv3MarginBox.Text             = tostring(AT3_LEVEL_MARGIN)
+        atv3MarginBox.TextColor3       = Color3.fromRGB(255, 255, 255)
+        atv3MarginBox.PlaceholderText  = "15"
+        atv3MarginBox.PlaceholderColor3 = Color3.fromRGB(80, 80, 80)
+        atv3MarginBox.TextSize         = 9
+        atv3MarginBox.Font             = Enum.Font.Gotham
+        atv3MarginBox.TextXAlignment   = Enum.TextXAlignment.Center
+        atv3MarginBox.ClearTextOnFocus = false
+        atv3MarginBox.Parent           = atv3MarginRow
+        do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0,3); c.Parent = atv3MarginBox end
+
+        atv3MarginBox.FocusLost:Connect(function()
+            local n = tonumber(atv3MarginBox.Text)
+            AT3_LEVEL_MARGIN = (n and n >= 0) and math.floor(n) or 15
+            atv3MarginBox.Text = tostring(AT3_LEVEL_MARGIN)
+        end)
     end
 
     -- ═══ Auto Scrap + Rebirth (y=124) ═══════════════════════════════
@@ -10242,11 +10288,38 @@ do -- === AUTO FARM (scoped) ===
                             while V.asrEnabled_af and (tick() - t0) < ASR_MONEY_WAIT_TIMEOUT do
                                 local moneyNow = asrGetMoney()
                                 if moneyBefore and moneyNow and moneyNow > moneyBefore then
-                                    print(string.format("[ASR] STEP 7: Money masuk %s -> %s — FIRE REBIRTH", tostring(moneyBefore), tostring(moneyNow)))
-                                    pcall(function()
-                                        game:GetService("ReplicatedStorage").Remotes.Rebirth:InvokeServer()
-                                    end)
+                                    print(string.format("[ASR] STEP 7: Money masuk %s -> %s — SPAM FIRE REBIRTH sampai level reset", tostring(moneyBefore), tostring(moneyNow)))
                                     fired = true
+
+                                    -- FIX: spam fire rebirth sampai level betul2 reset
+                                    -- (detect level drop balik ke 1 sebagai confirm rebirth jadi)
+                                    local RS2 = game:GetService("ReplicatedStorage")
+                                    local spamT0 = tick()
+                                    local SPAM_TIMEOUT = 8 -- saat max spam
+                                    local levelBefore = nil
+                                    pcall(function()
+                                        local DC = require(V.LocalPlayer:WaitForChild("PlayerScripts").Core.Data.DataController)
+                                        levelBefore = DC.level and DC.level() or nil
+                                    end)
+                                    while V.asrEnabled_af and (tick() - spamT0) < SPAM_TIMEOUT do
+                                        pcall(function()
+                                            RS2.Remotes.Rebirth:InvokeServer()
+                                        end)
+                                        -- Check level reset sebagai confirm rebirth berjaya
+                                        local rebirthDone = false
+                                        pcall(function()
+                                            local DC = require(V.LocalPlayer:WaitForChild("PlayerScripts").Core.Data.DataController)
+                                            local lvlNow = DC.level and DC.level() or nil
+                                            if levelBefore and lvlNow and lvlNow < levelBefore then
+                                                rebirthDone = true
+                                            end
+                                        end)
+                                        if rebirthDone then
+                                            print("[ASR] STEP 7: Rebirth confirmed (level reset) — stop spam")
+                                            break
+                                        end
+                                        task.wait(0.05)
+                                    end
                                     break
                                 end
                                 task.wait(ASR_MONEY_POLL_INTERVAL)
