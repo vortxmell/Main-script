@@ -9784,11 +9784,11 @@ do -- === AUTO FARM (scoped) ===
         local rivalLevel = floorData.level
 
         if debugPrint then
-            print(("[atv3Debug] myLevel=%d rivalLevel=%d (floor %d) perlu>=%d"):format(
+            print(("[atv3Debug] myLevel=%d rivalLevel=%d (floor %d) perlu==%d"):format(
                 myLevel, rivalLevel, floorToCheck, rivalLevel + AT3_LEVEL_MARGIN))
         end
 
-        local canBeat = myLevel >= (rivalLevel + AT3_LEVEL_MARGIN)
+        local canBeat = myLevel == (rivalLevel + AT3_LEVEL_MARGIN)
         return canBeat, myLevel, rivalLevel
     end
 
@@ -10093,6 +10093,12 @@ do -- === AUTO FARM (scoped) ===
     end
 
     local asrStartPos = nil
+    -- Flag scrap collection per-cycle (BUKAN per-poll) — supaya scrap
+    -- collection start SEKALI je bila toggle ON/cycle baru mula, dan
+    -- tak re-spawn setiap kali outer loop re-poll semasa tunggu level
+    -- gate (1a) lepas.
+    local asrScrapStarted = false
+    local asrScrapDone = false
 
     local function comboRunLoop()
         if comboLoopRunning then return end
@@ -10128,23 +10134,15 @@ do -- === AUTO FARM (scoped) ===
                         if not requirementFloor or not towerBest then
                             task.wait(AT3_CHECK_INTERVAL)
                         else
-                            -- ═══ STEP 1(a): level-check gate ═══
-                            -- myLevel >= rivalLevel di requirementFloor (gate
-                            -- rebirth) — kalau dah capai target climb tu
-                            -- (towerBest >= requirementFloor), takyah check
-                            -- level lagi, terus anggap gate "lepas" (skip
-                            -- terus ke step 5, sama macam Auto Tower V3 asal).
-                            local canBeat = atv3CanBeatFloor(mods2, requirementFloor)
-                            local alreadyAtGate = towerBest >= requirementFloor
-
-                            if not canBeat and not alreadyAtGate then
-                                task.wait(AT3_CHECK_INTERVAL)
-                            else
-                                -- ═══ STEP 1(b): scrap collection — SERENTAK
-                                -- dgn (a)/2/3/4 (task.spawn berasingan, sebab
-                                -- climb Tower guna remote invoke sahaja, TAK
-                                -- gerakkan avatar secara fizikal) ═══
-                                local scrapDone = false
+                            -- ═══ STEP 1(b): scrap collection — START TERUS
+                            -- bila toggle ON, TAK PERLU tunggu step 1(a)
+                            -- level-check lepas dulu. Guna flag asrScrapStarted
+                            -- supaya spawn SEKALI SAHAJA per cycle — bukan
+                            -- re-spawn setiap kali outer loop re-poll semasa
+                            -- tunggu level gate (1a) lepas di bawah. ═══
+                            if not asrScrapStarted then
+                                asrScrapStarted = true
+                                asrScrapDone = false
                                 task.spawn(function()
                                     local collected = 0
                                     while V.comboEnabled_af and collected < ASR_TARGET_SCRAP do
@@ -10167,9 +10165,22 @@ do -- === AUTO FARM (scoped) ===
                                         asrWalkToPrecise(hum, root, startPos, ASR_WALK_TIMEOUT)
                                     end
                                     print("[Combo] STEP 1(b): dah balik start position — tunggu step 5")
-                                    scrapDone = true
+                                    asrScrapDone = true
                                 end)
+                            end
 
+                            -- ═══ STEP 1(a): level-check gate ═══
+                            -- myLevel == rivalLevel + margin di requirementFloor
+                            -- (gate rebirth) — kalau dah capai target climb tu
+                            -- (towerBest >= requirementFloor), takyah check
+                            -- level lagi, terus anggap gate "lepas" (skip
+                            -- terus ke step 5, sama macam Auto Tower V3 asal).
+                            local canBeat = atv3CanBeatFloor(mods2, requirementFloor)
+                            local alreadyAtGate = towerBest >= requirementFloor
+
+                            if not canBeat and not alreadyAtGate then
+                                task.wait(AT3_CHECK_INTERVAL)
+                            else
                                 -- ═══ STEP 2+3+4: fire ke frontier, monitor
                                 -- climb (check tower floor xx=xx), retreat ═══
                                 if not alreadyAtGate then
@@ -10180,9 +10191,10 @@ do -- === AUTO FARM (scoped) ===
                                     end
                                 end
 
-                                -- tunggu (b) scrap collection habis — avatar
+                                -- tunggu (b) scrap collection habis (dah collect
+                                -- 15 & dah patah balik start position) — avatar
                                 -- sama dipakai kat step 6 nanti
-                                while V.comboEnabled_af and not scrapDone do
+                                while V.comboEnabled_af and not asrScrapDone do
                                     task.wait(0.2)
                                 end
 
@@ -10256,6 +10268,11 @@ do -- === AUTO FARM (scoped) ===
                                         end
                                     end
                                 end
+
+                                -- Cycle habis — reset flag scrap supaya cycle
+                                -- rebirth SETERUSNYA collect scrap semula dari 0.
+                                asrScrapStarted = false
+                                asrScrapDone = false
                             end
                         end
                     end
