@@ -9747,8 +9747,14 @@ do -- === AUTO FARM (scoped) ===
         for _, body in ipairs(bodies:GetChildren()) do
             if body.Name:find("coop:" .. tostring(plot), 1, true) then
                 matchedAny = true
-                local lvlNode = atSafeNavigate(body, "BillboardGui", "Frame", "canvas", "text", "lvl")
-                if not lvlNode then return nil, ("lvl node tak jumpa (body=%s)"):format(body.Name) end
+                -- Guna FindFirstChild(name, true) — RECURSIVE search, cari
+                -- node "lvl" di MANA-MANA dalam BillboardGui, tak kira
+                -- struktur nested (path tetap "canvas.text.lvl" rupanya
+                -- tak consistent merentasi jenis/tahap chicken berbeza).
+                local billboard = body:FindFirstChildOfClass("BillboardGui")
+                if not billboard then return nil, ("BillboardGui tak jumpa (body=%s)"):format(body.Name) end
+                local lvlNode = billboard:FindFirstChild("lvl", true)
+                if not lvlNode then return nil, ("lvl node tak jumpa recursive (body=%s)"):format(body.Name) end
                 local lvlText = lvlNode:IsA("TextLabel") and lvlNode.Text or nil
                 if not lvlText then return nil, "lvl node bukan TextLabel/Text kosong" end
                 local n = tonumber((lvlText:gsub("%D", "")))
