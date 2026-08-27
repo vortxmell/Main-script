@@ -607,7 +607,7 @@ V.TOOLS_DROP_OPEN_H  = 80   -- Tools: Wall Tools row + Platform Tools row
 -- Farming dropdown: Auto Collect Scrap, Auto Rebirth, Auto Tower (V3 —
 -- V1/V2 dah completely removed).
 V.AF_DROP_CLOSED_H = 24
-V.AF_DROP_OPEN_H   = 172
+V.AF_DROP_OPEN_H   = 150
 V.afDropOpen = false
 -- Upgrades dropdown: Auto Upgrade Coop + Auto Upgrade Feeder.
 V.UP_DROP_CLOSED_H = 24
@@ -9814,7 +9814,7 @@ do -- === AUTO FARM (scoped) ===
     -- V2 punya atv2MonitorClimb TAK disentuh (dah confirmed jalan elok).
     local function atv3MonitorClimb(mods2, requirementFloor)
         local giveUp = tick() + AT2_CLIMB_TIMEOUT
-        while V.autoTowerV3Enabled_af and tick() < giveUp do
+        while V.comboEnabled_af and tick() < giveUp do
             if atGetSkipBtn() then
                 atFireDecline()
                 local giveUp2 = tick() + 5
@@ -9841,58 +9841,11 @@ do -- === AUTO FARM (scoped) ===
         return "timeout"
     end
 
-    V.autoTowerV3Enabled_af = false
-    local autoTowerV3LoopRunning = false
-
-    local function autoTowerV3RunLoop()
-        if autoTowerV3LoopRunning then return end
-        autoTowerV3LoopRunning = true
-        task.spawn(function()
-            while V.autoTowerV3Enabled_af do
-                local mods2 = atv2GetModules()
-
-                if not mods2 then
-                    task.wait(AT3_CHECK_INTERVAL)
-                else
-                    local requirementFloor = atv2GetRequirementFloor(mods2)
-                    local towerBest = atv2GetTowerBest(mods2)
-
-                    if not requirementFloor or not towerBest then
-                        task.wait(AT3_CHECK_INTERVAL)
-                    elseif towerBest >= requirementFloor then
-                        -- Target (gate rebirth) dah capai, takde apa nak climb lagi buat masa ni.
-                        task.wait(AT3_CHECK_INTERVAL)
-                    else
-                        -- REVISI (confirmed by Mel): compare LEVEL terhadap
-                        -- requirementFloor (gate rebirth — floor PALING SUSAH
-                        -- yg perlu dikalahkan), BUKAN frontierFloor. Sebab:
-                        -- difficulty naik ikut floor number, so kalau chicken
-                        -- kita boleh kalahkan rival di requirementFloor
-                        -- (paling susah), automatik boleh kalahkan semua
-                        -- floor pertengahan (towerBest+1 sampai
-                        -- requirementFloor) — cukup check SEKALI je, tak
-                        -- payah re-check floor demi floor semasa climb naik.
-                        -- (frontierFloor tetap dikira & dipakai sebagai
-                        -- ARGUMENT warp elevator — tak berkaitan dgn level
-                        -- check, cuma destinasi teleport.)
-                        local frontierFloor = towerBest + 1
-                        local canBeat = atv3CanBeatFloor(mods2, requirementFloor)
-                        if canBeat then
-                            local fired = atv2FireStraightToFrontier(frontierFloor)
-                            if fired then
-                                atv3MonitorClimb(mods2, requirementFloor)
-                            else
-                                task.wait(AT3_CHECK_INTERVAL)
-                            end
-                        else
-                            task.wait(AT3_CHECK_INTERVAL)
-                        end
-                    end
-                end
-            end
-            autoTowerV3LoopRunning = false
-        end)
-    end
+    -- NOTE: Auto Tower V3 punya run-loop sendiri (toggle berasingan) dah
+    -- REMOVED — logic climb/monitor/retreat kini jadi sebahagian flow
+    -- gabungan "Auto Tower + Scrap + Rebirth" (tengok bahagian bawah,
+    -- selepas Auto Rebirth). Function-function shared di atas (atv3*,
+    -- atv2*, atGetMyCoop) dikekalkan sebab combo loop reuse semua.
 
     -- ── Auto Tower: Stats status row (y=82) ──────────────────────────
     local atv3StatusRow = Instance.new("Frame")
@@ -9953,107 +9906,20 @@ do -- === AUTO FARM (scoped) ===
         end
     end)
 
-    -- ── Auto Tower: Stats toggle (y=102) ─────────────────────────────
+    -- NOTE: Toggle "Auto Tower: Stats" berasingan dah REMOVED — satu2nya
+    -- toggle untuk seluruh flow (tower + scrap + rebirth) kini row
+    -- "Auto Tower + Scrap + Rebirth" di bawah (gantikan bekas "Auto
+    -- Scrap + Rebirth"). Level Margin inputbox dikekalkan (masih relevan
+    -- untuk step 1(a) level-check) dan disave dalam cfg toggle gabungan tu.
     local atv3MarginBox = nil -- forward declare; assigned in Level Margin inputbox block below
-    local atv3Row = Instance.new("Frame")
-    atv3Row.Size = UDim2.new(1, -8, 0, 22)
-    atv3Row.Position = UDim2.new(0, 4, 0, 102)
-    atv3Row.BackgroundTransparency = 1
-    atv3Row.BorderSizePixel = 0
-    atv3Row.Parent = V.afWrapper
 
-    local atv3Lbl = Instance.new("TextLabel")
-    atv3Lbl.Size = UDim2.new(0.55, 0, 1, 0)
-    atv3Lbl.BackgroundTransparency = 1
-    atv3Lbl.Text = "Auto Tower: Stats"
-    atv3Lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
-    atv3Lbl.TextSize = 10
-    atv3Lbl.Font = Enum.Font.Gotham
-    atv3Lbl.TextXAlignment = Enum.TextXAlignment.Left
-    atv3Lbl.Parent = atv3Row
-
-    local atv3StateText = Instance.new("TextLabel")
-    atv3StateText.Size = UDim2.new(0.18, 0, 1, 0)
-    atv3StateText.Position = UDim2.new(0.55, 0, 0, 0)
-    atv3StateText.BackgroundTransparency = 1
-    atv3StateText.Text = "OFF"
-    atv3StateText.TextColor3 = Color3.fromRGB(160, 160, 160)
-    atv3StateText.TextSize = 10
-    atv3StateText.Font = Enum.Font.GothamBold
-    atv3StateText.TextXAlignment = Enum.TextXAlignment.Right
-    atv3StateText.Parent = atv3Row
-
-    local atv3PillTrack = Instance.new("Frame")
-    atv3PillTrack.Size = UDim2.new(0, 34, 0, 16)
-    atv3PillTrack.Position = UDim2.new(1, -34, 0.5, -8)
-    atv3PillTrack.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    atv3PillTrack.BorderSizePixel = 0
-    atv3PillTrack.Parent = atv3Row
-    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = atv3PillTrack end
-
-    local atv3Knob = Instance.new("Frame")
-    atv3Knob.Size = UDim2.new(0, 12, 0, 12)
-    atv3Knob.Position = UDim2.new(0, 2, 0.5, -6)
-    atv3Knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-    atv3Knob.BorderSizePixel = 0
-    atv3Knob.Parent = atv3PillTrack
-    do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1,0); c.Parent = atv3Knob end
-
-    local atv3ToggleHitbox = Instance.new("TextButton")
-    atv3ToggleHitbox.Size = UDim2.new(0, 34, 0, 16)
-    atv3ToggleHitbox.Position = UDim2.new(1, -34, 0.5, -8)
-    atv3ToggleHitbox.BackgroundTransparency = 1
-    atv3ToggleHitbox.Text = ""
-    atv3ToggleHitbox.Parent = atv3Row
-
-    local atv3PillTween = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
-
-    local function updateAtv3Pill(on)
-        if on then
-            V.TweenService:Create(atv3PillTrack, atv3PillTween, {BackgroundColor3 = Color3.fromRGB(255,255,255)}):Play()
-            V.TweenService:Create(atv3Knob, atv3PillTween, {Position = UDim2.new(0,20,0.5,-6), BackgroundColor3 = Color3.fromRGB(0,0,0)}):Play()
-            atv3StateText.Text = "ON";  atv3StateText.TextColor3 = Color3.fromRGB(255,255,255)
-        else
-            V.TweenService:Create(atv3PillTrack, atv3PillTween, {BackgroundColor3 = Color3.fromRGB(60,60,60)}):Play()
-            V.TweenService:Create(atv3Knob, atv3PillTween, {Position = UDim2.new(0,2,0.5,-6), BackgroundColor3 = Color3.fromRGB(200,200,200)}):Play()
-            atv3StateText.Text = "OFF"; atv3StateText.TextColor3 = Color3.fromRGB(160,160,160)
-        end
-    end
-
-    atv3ToggleHitbox.MouseButton1Click:Connect(function()
-        V.autoTowerV3Enabled_af = not V.autoTowerV3Enabled_af
-        updateAtv3Pill(V.autoTowerV3Enabled_af)
-        if V.autoTowerV3Enabled_af then
-            autoTowerV3RunLoop()
-        end
-    end)
-
-    -- cfg: Auto Tower: Stats toggle
-    V.cfgRead["auto_tower_stats"] = function()
-        return {en = V.autoTowerV3Enabled_af, margin = AT3_LEVEL_MARGIN}
-    end
-    V.cfgApply["auto_tower_stats"] = function(t)
-        if t.margin and tonumber(t.margin) then
-            AT3_LEVEL_MARGIN = math.max(0, math.floor(tonumber(t.margin)))
-            if atv3MarginBox then atv3MarginBox.Text = tostring(AT3_LEVEL_MARGIN) end
-        end
-        local wantOn = (t.en == true)
-        if V.autoTowerV3Enabled_af ~= wantOn then
-            V.autoTowerV3Enabled_af = wantOn
-            updateAtv3Pill(V.autoTowerV3Enabled_af)
-            if V.autoTowerV3Enabled_af then
-                autoTowerV3RunLoop()
-            end
-        end
-    end
-
-    -- Level Margin inputbox (di bawah AT3 toggle row)
+    -- Level Margin inputbox (di bawah Stats status row, y=102)
     do
         local atv3MarginRow = Instance.new("Frame")
         atv3MarginRow.Size               = UDim2.new(1, -8, 0, 18)
-        atv3MarginRow.Position           = UDim2.new(0, 4, 0, 124)
+        atv3MarginRow.Position           = UDim2.new(0, 4, 0, 102)
         atv3MarginRow.BackgroundTransparency = 1
-        atv3MarginRow.Parent             = atv3Row.Parent
+        atv3MarginRow.Parent             = V.afWrapper
 
         local atv3MarginLbl = Instance.new("TextLabel")
         atv3MarginLbl.Size             = UDim2.new(0.6, 0, 1, 0)
@@ -10088,45 +9954,58 @@ do -- === AUTO FARM (scoped) ===
         end)
     end
 
-    -- ═══ Auto Scrap + Rebirth (y=124) ═══════════════════════════════
-    -- Flow (dah confirmed jalan via test_scrap_rebirth_v2.lua):
-    --   1. Simpan posisi start.
-    --   2. Loop collect 15 scrap — kalau takde scrap available skrg,
-    --      KEEP RETRY SCAN (bukan give up) sampai scrap spawn.
-    --   3. Balik ke start position (precise — retry-correct sampai
-    --      betul2 dekat, MoveTo() punya tolerance agak longgar).
-    --   4. Tunggu "ready to rebirth" true (poll, bukan sekali check).
-    --   5. Tunggu chicken kembali dekat coop (poll).
-    --   6. Walk ke recycler SAMBIL live-watch money — bila money mula
-    --      naik (deposit scrap dikira), FIRE rebirth serta-merta (tak
-    --      tunggu betul2 arrive recycler dulu).
-    --   7. Lepas rebirth (atau timeout), balik ke start position asal.
-    --   8. Ulang balik dari step 1, selagi toggle ON.
+    -- ═══ Auto Tower + Scrap + Rebirth (SATU FLOW GABUNGAN, y=120) ═══
+    -- Flow (per spesifikasi Mel — gabungkan Auto Tower V3 dgn Auto
+    -- Scrap+Rebirth jadi SATU flow, bukan dua loop berasingan):
+    --   1. (a) Level-check gate: myLevel >= rivalLevel (floor xx: chicken
+    --          level xx, dari Stats Info panel) — lepas check ni, next
+    --          step 2.
+    --      (b) SERENTAK dgn (a): scan semua scrap, walk collect 15 scrap,
+    --          lepas cukup 15, walk balik posisi asal & tunggu step 5.
+    --          (Boleh jalan serentak sebab climb Tower guna remote
+    --          invoke/monitor sahaja — TAK gerakkan avatar player secara
+    --          fizikal, so avatar bebas collect scrap serentak.)
+    --   2. Fire straight to floor frontier (towerBest + 1).
+    --   3. Check tower floor (live, dari Stats Info panel) — bila floor
+    --      dah sama/lepas requirement, next step.
+    --   4. Retreat.
+    --   5. Tunggu chicken betul-betul dah berada dalam coop (poll).
+    --   6. (b) Approach recycler.
+    --   7. Live-check money — bila money mula masuk, FIRE rebirth
+    --      EXACTLY 2 KALI (bukan spam) dgn jeda antara klik pertama &
+    --      kedua macam double-click manual (<1 saat, tak terlalu laju
+    --      tak terlalu perlahan).
+    --   8. Check tower best (Stats Info panel) — kalau 0, confirm dah
+    --      reset, ulang balik dari step 1.
     --
     -- Reuse helper dari Auto Collect Scrap (acsGetChar/acsGetPos/
     -- acsGetNearestScrap/acsGetRecyclerPos) dan Auto Tower V3
-    -- (atGetMyCoop/atv2GetModules/atv2GetRequirementFloor/
-    -- atv2GetTowerBest) — semua plain local dlm scope AUTO FARM yg
-    -- sama, jadi boleh terus dipanggil di sini.
+    -- (atGetMyCoop/atv3CanBeatFloor/atv2GetModules/atv2GetRequirementFloor/
+    -- atv2GetTowerBest/atv2FireStraightToFrontier/atv3MonitorClimb) —
+    -- semua plain local dlm scope AUTO FARM yg sama, jadi boleh terus
+    -- dipanggil di sini.
     local ASR_TARGET_SCRAP        = 15
     local ASR_COLLECT_WAIT        = 2
     local ASR_WALK_TIMEOUT        = 15
     local ASR_SCAN_RETRY_WAIT     = 1    -- saat antara re-scan bila takde scrap
     local ASR_PRECISE_THRESHOLD   = 1.5  -- studs — dianggap "sampai" utk return-to-start
     local ASR_PRECISE_MAX_RETRY   = 5
-    local ASR_READY_POLL_INTERVAL = 2    -- saat antara poll ready-to-rebirth / chicken-at-coop
+    local ASR_READY_POLL_INTERVAL = 2    -- saat antara poll chicken-at-coop
     local ASR_MONEY_POLL_INTERVAL = 0.05 -- 50ms — secepat mungkin detect duit masuk
     local ASR_MONEY_WAIT_TIMEOUT  = 15
     local ASR_MIN_SAFE_DIST_RECYCLER = 15 -- studs
     local ASR_MIN_SAFE_DIST_COOP_PAD = 5  -- studs, padding luar bounding box coop
+    local ASR_DBLCLICK_MIN        = 0.35  -- saat — jeda min antara fire rebirth #1 & #2
+    local ASR_DBLCLICK_MAX        = 0.85  -- saat — jeda max (<1s, macam double-click manual)
+    local ASR_CONFIRM_TIMEOUT     = 8     -- saat max tunggu Tower best jadi 0 (step 8)
 
-    V.asrEnabled_af = false
-    local asrLoopRunning = false
+    V.comboEnabled_af = false
+    local comboLoopRunning = false
 
-    -- Walk yg respect toggle V.asrEnabled_af sendiri (BUKAN reuse
+    -- Walk yg respect toggle V.comboEnabled_af sendiri (BUKAN reuse
     -- acsWalkTo terus — acsWalkTo punya loop tied ke V.acsEnabled_af,
     -- toggle Auto Collect Scrap yg lain, boleh exit awal kalau toggle
-    -- tu OFF walaupun Auto Scrap+Rebirth tengah jalan).
+    -- tu OFF walaupun combo flow ni tengah jalan).
     local function asrWalkTo(hum, root, targetPos, timeout)
         timeout = timeout or ASR_WALK_TIMEOUT
         hum:MoveTo(targetPos)
@@ -10134,7 +10013,7 @@ do -- === AUTO FARM (scoped) ===
         local conn
         conn = hum.MoveToFinished:Connect(function() reached = true end)
         local t0 = tick()
-        while V.asrEnabled_af and not reached and (tick() - t0) < timeout do
+        while V.comboEnabled_af and not reached and (tick() - t0) < timeout do
             task.wait(0.1)
         end
         if conn.Connected then conn:Disconnect() end
@@ -10142,7 +10021,7 @@ do -- === AUTO FARM (scoped) ===
 
     local function asrWalkToPrecise(hum, root, targetPos, timeout)
         for _ = 1, ASR_PRECISE_MAX_RETRY do
-            if not V.asrEnabled_af then return false end
+            if not V.comboEnabled_af then return false end
             asrWalkTo(hum, root, targetPos, timeout)
             local dist = (root.Position - targetPos).Magnitude
             if dist <= ASR_PRECISE_THRESHOLD then return true end
@@ -10215,11 +10094,11 @@ do -- === AUTO FARM (scoped) ===
 
     local asrStartPos = nil
 
-    local function asrRunLoop()
-        if asrLoopRunning then return end
-        asrLoopRunning = true
+    local function comboRunLoop()
+        if comboLoopRunning then return end
+        comboLoopRunning = true
         task.spawn(function()
-            while V.asrEnabled_af do
+            while V.comboEnabled_af do
                 local char, hum, root = acsGetChar()
                 if not root then
                     task.wait(0.5)
@@ -10231,133 +10110,164 @@ do -- === AUTO FARM (scoped) ===
                     if not asrStartPos then
                         local safe, reason = asrIsPosSafe(root.Position)
                         if not safe then
-                            warn("[ASR] Posisi semasa " .. tostring(reason) ..
+                            warn("[Combo] Posisi semasa " .. tostring(reason) ..
                                 " — toggle ON di lokasi lain (jauh dari recycler & tapak coop) untuk elak deposit pramatang.")
                         end
                         asrStartPos = root.Position
-                        print("[ASR] Start position dikunci:", tostring(asrStartPos))
+                        print("[Combo] Start position dikunci:", tostring(asrStartPos))
                     end
                     local startPos = asrStartPos
 
-                    -- STEP 1+2: loop collect 15 scrap — keep retry scan
-                    -- kalau takde scrap available (tunggu spawn, bukan give up)
-                    local collected = 0
-                    while V.asrEnabled_af and collected < ASR_TARGET_SCRAP do
-                        local scrap, scrapPos = acsGetNearestScrap(root)
-                        if not scrap then
-                            task.wait(ASR_SCAN_RETRY_WAIT) -- takde scrap skrg, keep retry
+                    local mods2 = atv2GetModules()
+                    if not mods2 then
+                        task.wait(AT3_CHECK_INTERVAL)
+                    else
+                        local requirementFloor = atv2GetRequirementFloor(mods2)
+                        local towerBest = atv2GetTowerBest(mods2)
+
+                        if not requirementFloor or not towerBest then
+                            task.wait(AT3_CHECK_INTERVAL)
                         else
-                            asrWalkTo(hum, root, scrapPos, ASR_WALK_TIMEOUT)
-                            local t0 = tick()
-                            while V.asrEnabled_af and scrap.Parent and (tick() - t0) < ASR_COLLECT_WAIT do
-                                task.wait(0.1)
-                            end
-                            if not scrap.Parent then
-                                collected = collected + 1
-                            end
-                        end
-                    end
+                            -- ═══ STEP 1(a): level-check gate ═══
+                            -- myLevel >= rivalLevel di requirementFloor (gate
+                            -- rebirth) — kalau dah capai target climb tu
+                            -- (towerBest >= requirementFloor), takyah check
+                            -- level lagi, terus anggap gate "lepas" (skip
+                            -- terus ke step 5, sama macam Auto Tower V3 asal).
+                            local canBeat = atv3CanBeatFloor(mods2, requirementFloor)
+                            local alreadyAtGate = towerBest >= requirementFloor
 
-                    print(string.format("[ASR] Collect selesai: %d/%d scrap", collected, ASR_TARGET_SCRAP))
-
-                    -- STEP 3: balik ke start position (precise)
-                    if V.asrEnabled_af then
-                        asrWalkToPrecise(hum, root, startPos, ASR_WALK_TIMEOUT)
-                    end
-                    print("[ASR] STEP 3 selesai — dah balik start position")
-
-                    -- STEP 4: tunggu ready-to-rebirth true (poll)
-                    while V.asrEnabled_af do
-                        local mods = atv2GetModules()
-                        local reqFloor = mods and atv2GetRequirementFloor(mods)
-                        local towerBest = mods and atv2GetTowerBest(mods)
-                        print(string.format("[ASR] STEP 4 check: mods=%s reqFloor=%s towerBest=%s",
-                            tostring(mods ~= nil), tostring(reqFloor), tostring(towerBest)))
-                        if reqFloor and towerBest and towerBest >= reqFloor then
-                            break
-                        end
-                        task.wait(ASR_READY_POLL_INTERVAL)
-                    end
-                    print("[ASR] STEP 4 selesai — ready to rebirth = true")
-
-                    -- STEP 5: tunggu chicken kembali dekat coop (poll)
-                    while V.asrEnabled_af and not asrIsChickenAtCoop() do
-                        print("[ASR] STEP 5: chicken belum sampai coop, tunggu...")
-                        task.wait(ASR_READY_POLL_INTERVAL)
-                    end
-                    print("[ASR] STEP 5 selesai — chicken dah kat coop")
-
-                    -- STEP 6+7: walk ke recycler + live money watch + fire
-                    -- rebirth serta-merta, pastu balik ke start position
-                    if V.asrEnabled_af then
-                        local rPos = acsGetRecyclerPos()
-                        local char2, hum2, root2 = acsGetChar()
-                        print(string.format("[ASR] STEP 6: rPos=%s hum2=%s root2=%s",
-                            tostring(rPos ~= nil), tostring(hum2 ~= nil), tostring(root2 ~= nil)))
-                        if rPos and hum2 and root2 then
-                            local moneyBefore = asrGetMoney()
-                            print("[ASR] STEP 6: moneyBefore=" .. tostring(moneyBefore) .. " — mula walk ke recycler...")
-                            hum2:MoveTo(rPos)
-
-                            local t0 = tick()
-                            local fired = false
-                            while V.asrEnabled_af and (tick() - t0) < ASR_MONEY_WAIT_TIMEOUT do
-                                local moneyNow = asrGetMoney()
-                                if moneyBefore and moneyNow and moneyNow > moneyBefore then
-                                    print(string.format("[ASR] STEP 7: Money masuk %s -> %s — SPAM FIRE REBIRTH sampai Tower best reset ke 0", tostring(moneyBefore), tostring(moneyNow)))
-                                    fired = true
-
-                                    -- Confirm rebirth guna Tower best (stats info) — bila
-                                    -- Tower best jadi 0, tu confirm rebirth dah berjaya,
-                                    -- terus lanjut takyah tunggu lagi. Simple, reuse
-                                    -- atv2GetModules/atv2GetTowerBest yg dah ada.
-                                    local spamT0 = tick()
-                                    local SPAM_TIMEOUT = 8 -- saat max spam
-                                    while V.asrEnabled_af and (tick() - spamT0) < SPAM_TIMEOUT do
-                                        pcall(function()
-                                            game:GetService("ReplicatedStorage").Remotes.Rebirth:InvokeServer()
-                                        end)
-                                        local rebirthDone = false
-                                        local mods = atv2GetModules()
-                                        local towerBestNow = mods and atv2GetTowerBest(mods)
-                                        if towerBestNow == 0 then
-                                            rebirthDone = true
+                            if not canBeat and not alreadyAtGate then
+                                task.wait(AT3_CHECK_INTERVAL)
+                            else
+                                -- ═══ STEP 1(b): scrap collection — SERENTAK
+                                -- dgn (a)/2/3/4 (task.spawn berasingan, sebab
+                                -- climb Tower guna remote invoke sahaja, TAK
+                                -- gerakkan avatar secara fizikal) ═══
+                                local scrapDone = false
+                                task.spawn(function()
+                                    local collected = 0
+                                    while V.comboEnabled_af and collected < ASR_TARGET_SCRAP do
+                                        local scrap, scrapPos = acsGetNearestScrap(root)
+                                        if not scrap then
+                                            task.wait(ASR_SCAN_RETRY_WAIT) -- takde scrap skrg, keep retry
+                                        else
+                                            asrWalkTo(hum, root, scrapPos, ASR_WALK_TIMEOUT)
+                                            local t0 = tick()
+                                            while V.comboEnabled_af and scrap.Parent and (tick() - t0) < ASR_COLLECT_WAIT do
+                                                task.wait(0.1)
+                                            end
+                                            if not scrap.Parent then
+                                                collected = collected + 1
+                                            end
                                         end
-                                        if rebirthDone then
-                                            print("[ASR] STEP 7: Rebirth confirmed (Tower best = 0) — stop spam")
-                                            break
-                                        end
-                                        task.wait(0.05)
                                     end
-                                    break
-                                end
-                                task.wait(ASR_MONEY_POLL_INTERVAL)
-                            end
-                            if not fired then
-                                print("[ASR] STEP 7: TIMEOUT — duit tak masuk dalam " .. ASR_MONEY_WAIT_TIMEOUT .. "s, rebirth TAK di-fire")
-                            end
+                                    print(string.format("[Combo] STEP 1(b) selesai: %d/%d scrap", collected, ASR_TARGET_SCRAP))
+                                    if V.comboEnabled_af then
+                                        asrWalkToPrecise(hum, root, startPos, ASR_WALK_TIMEOUT)
+                                    end
+                                    print("[Combo] STEP 1(b): dah balik start position — tunggu step 5")
+                                    scrapDone = true
+                                end)
 
-                            -- Lepas rebirth (character mungkin respawn),
-                            -- tunggu sekejap pastu re-fetch char sebelum
-                            -- balik ke start position.
-                            if fired then task.wait(1) end
-                            if V.asrEnabled_af then
-                                local char3, hum3, root3 = acsGetChar()
-                                if hum3 and root3 then
-                                    asrWalkToPrecise(hum3, root3, startPos, ASR_WALK_TIMEOUT)
+                                -- ═══ STEP 2+3+4: fire ke frontier, monitor
+                                -- climb (check tower floor xx=xx), retreat ═══
+                                if not alreadyAtGate then
+                                    local frontierFloor = towerBest + 1
+                                    local fired = atv2FireStraightToFrontier(frontierFloor)
+                                    if fired then
+                                        atv3MonitorClimb(mods2, requirementFloor)
+                                    end
+                                end
+
+                                -- tunggu (b) scrap collection habis — avatar
+                                -- sama dipakai kat step 6 nanti
+                                while V.comboEnabled_af and not scrapDone do
+                                    task.wait(0.2)
+                                end
+
+                                -- ═══ STEP 5: tunggu chicken betul2 dah dalam coop ═══
+                                while V.comboEnabled_af and not asrIsChickenAtCoop() do
+                                    print("[Combo] STEP 5: chicken belum sampai coop, tunggu...")
+                                    task.wait(ASR_READY_POLL_INTERVAL)
+                                end
+                                print("[Combo] STEP 5 selesai — chicken dah kat coop")
+
+                                -- ═══ STEP 6+7+8: approach recycler, live money
+                                -- watch, fire rebirth 2x (double-click), confirm reset ═══
+                                if V.comboEnabled_af then
+                                    local rPos = acsGetRecyclerPos()
+                                    local char2, hum2, root2 = acsGetChar()
+                                    if rPos and hum2 and root2 then
+                                        local moneyBefore = asrGetMoney()
+                                        print("[Combo] STEP 6: moneyBefore=" .. tostring(moneyBefore) .. " — mula walk ke recycler...")
+                                        hum2:MoveTo(rPos) -- STEP 6: approach recycler
+
+                                        local t0 = tick()
+                                        local fired = false
+                                        while V.comboEnabled_af and (tick() - t0) < ASR_MONEY_WAIT_TIMEOUT do
+                                            local moneyNow = asrGetMoney()
+                                            if moneyBefore and moneyNow and moneyNow > moneyBefore then
+                                                print(string.format("[Combo] STEP 7: Money masuk %s -> %s — fire rebirth 2x (double-click)", tostring(moneyBefore), tostring(moneyNow)))
+                                                fired = true
+
+                                                -- Fire #1 serta-merta.
+                                                pcall(function()
+                                                    game:GetService("ReplicatedStorage").Remotes.Rebirth:InvokeServer()
+                                                end)
+                                                -- Jeda macam double-click manual: <1 saat,
+                                                -- tak terlalu laju tak terlalu perlahan.
+                                                task.wait(ASR_DBLCLICK_MIN + math.random() * (ASR_DBLCLICK_MAX - ASR_DBLCLICK_MIN))
+                                                -- Fire #2 — LEPAS ni STOP, tak spam lagi.
+                                                pcall(function()
+                                                    game:GetService("ReplicatedStorage").Remotes.Rebirth:InvokeServer()
+                                                end)
+
+                                                -- STEP 8: confirm rebirth guna Tower best
+                                                -- (stats info) — bila jadi 0, confirm reset,
+                                                -- terus poll je (TAK fire remote lagi).
+                                                local confirmT0 = tick()
+                                                while V.comboEnabled_af and (tick() - confirmT0) < ASR_CONFIRM_TIMEOUT do
+                                                    local m = atv2GetModules()
+                                                    local towerBestNow = m and atv2GetTowerBest(m)
+                                                    if towerBestNow == 0 then
+                                                        print("[Combo] STEP 8: Rebirth confirmed (Tower best = 0) — ulang dari step 1")
+                                                        break
+                                                    end
+                                                    task.wait(0.2)
+                                                end
+                                                break
+                                            end
+                                            task.wait(ASR_MONEY_POLL_INTERVAL)
+                                        end
+                                        if not fired then
+                                            print("[Combo] STEP 7: TIMEOUT — duit tak masuk dalam " .. ASR_MONEY_WAIT_TIMEOUT .. "s, rebirth TAK di-fire")
+                                        end
+
+                                        -- Lepas rebirth (character mungkin respawn),
+                                        -- tunggu sekejap pastu re-fetch char sebelum
+                                        -- balik ke start position.
+                                        if fired then task.wait(1) end
+                                        if V.comboEnabled_af then
+                                            local char3, hum3, root3 = acsGetChar()
+                                            if hum3 and root3 then
+                                                asrWalkToPrecise(hum3, root3, startPos, ASR_WALK_TIMEOUT)
+                                            end
+                                        end
+                                    end
                                 end
                             end
                         end
                     end
                 end
             end
-            asrLoopRunning = false
+            comboLoopRunning = false
         end)
     end
 
     local asrRow = Instance.new("Frame")
     asrRow.Size = UDim2.new(1, -8, 0, 22)
-    asrRow.Position = UDim2.new(0, 4, 0, 142)
+    asrRow.Position = UDim2.new(0, 4, 0, 120)
     asrRow.BackgroundTransparency = 1
     asrRow.BorderSizePixel = 0
     asrRow.Parent = V.afWrapper
@@ -10365,7 +10275,7 @@ do -- === AUTO FARM (scoped) ===
     local asrLbl = Instance.new("TextLabel")
     asrLbl.Size = UDim2.new(0.55, 0, 1, 0)
     asrLbl.BackgroundTransparency = 1
-    asrLbl.Text = "Auto Scrap + Rebirth"
+    asrLbl.Text = "Auto Tower + Scrap + Rebirth"
     asrLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
     asrLbl.TextSize = 10
     asrLbl.Font = Enum.Font.Gotham
@@ -10421,26 +10331,30 @@ do -- === AUTO FARM (scoped) ===
     end
 
     asrToggleHitbox.MouseButton1Click:Connect(function()
-        V.asrEnabled_af = not V.asrEnabled_af
-        updateAsrPill(V.asrEnabled_af)
-        if V.asrEnabled_af then
-            asrRunLoop()
+        V.comboEnabled_af = not V.comboEnabled_af
+        updateAsrPill(V.comboEnabled_af)
+        if V.comboEnabled_af then
+            comboRunLoop()
         else
             asrStartPos = nil -- reset supaya sesi seterusnya re-anchor dari posisi baru
         end
     end)
 
-    -- cfg: Auto Scrap + Rebirth toggle
-    V.cfgRead["auto_scrap_rebirth"] = function()
-        return {en = V.asrEnabled_af}
+    -- cfg: Auto Tower + Scrap + Rebirth toggle (termasuk Level Margin)
+    V.cfgRead["auto_tower_scrap_rebirth"] = function()
+        return {en = V.comboEnabled_af, margin = AT3_LEVEL_MARGIN}
     end
-    V.cfgApply["auto_scrap_rebirth"] = function(t)
+    V.cfgApply["auto_tower_scrap_rebirth"] = function(t)
+        if t.margin and tonumber(t.margin) then
+            AT3_LEVEL_MARGIN = math.max(0, math.floor(tonumber(t.margin)))
+            if atv3MarginBox then atv3MarginBox.Text = tostring(AT3_LEVEL_MARGIN) end
+        end
         local wantOn = (t.en == true)
-        if V.asrEnabled_af ~= wantOn then
-            V.asrEnabled_af = wantOn
-            updateAsrPill(V.asrEnabled_af)
-            if V.asrEnabled_af then
-                asrRunLoop()
+        if V.comboEnabled_af ~= wantOn then
+            V.comboEnabled_af = wantOn
+            updateAsrPill(V.comboEnabled_af)
+            if V.comboEnabled_af then
+                comboRunLoop()
             else
                 asrStartPos = nil
             end
