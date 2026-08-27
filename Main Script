@@ -10096,24 +10096,28 @@ do -- === AUTO FARM (scoped) ===
     local scrapSpawned = false
     local scrapDone = false
 
-    -- Live count scrap yang betul-betul dah stack atas kepala chicken
-    -- (Character.Head.ScrapStack.Stack) — source of truth SEBENAR utk
-    -- "dah cukup 15 ke belum", bukan sekadar counter manual (yang boleh
-    -- silap kalau pickup gagal/race condition).
-    -- FIX BUG: sebelum ni hardcode "workspace.Thexmell..." (huruf kecil)
+    -- Live count scrap yang betul-betul dah stack atas kepala chicken —
+    -- source of truth SEBENAR utk "dah cukup 15 ke belum", bukan sekadar
+    -- counter manual (yang boleh silap kalau pickup gagal/race condition).
+    -- FIX BUG #1: sebelum ni hardcode "workspace.Thexmell..." (huruf kecil)
     -- — Roblox instance indexing case-sensitive, username sebenar
-    -- "TheXmell" (capital X/M) TAK MATCH "Thexmell", jadi pcall
-    -- SENYAP gagal setiap kali, function ni asyik return 0, loop
-    -- ingat tak cukup 15 SELAMA-LAMANYA -> collect non-stop. Fix:
-    -- guna LocalPlayer.Character terus (dinamik, tak bergantung nama).
+    -- "TheXmell" (capital X/M) TAK MATCH "Thexmell". Dah fix guna
+    -- LocalPlayer.Character terus (dinamik, tak bergantung nama).
+    -- FIX BUG #2 (punca sebenar collect tak stop): struktur betul ialah
+    -- 15 INSTANCE BERASINGAN, SEMUA bernama "Stack", terus di bawah
+    -- ScrapStack (bukan SATU folder "Stack" yang ada 15 anak dalam).
+    -- Dot-index "ScrapStack.Stack" cuma amik SATU instance pertama yang
+    -- match nama tu (Lua/Roblox indexing dgn nama berulang → first match
+    -- je), pastu kira anak-anak instance tunggal tu (biasanya 0) — jadi
+    -- asyik return 0 walaupun scrap dah banyak. Fix: kira terus
+    -- #ScrapStack:GetChildren() (semua "Stack" siblings sekali).
     local function asrGetScrapStackCount()
-        local ok, stack = pcall(function()
+        local ok, count = pcall(function()
             local char = V.LocalPlayer.Character
-            return char and char.Head.ScrapStack.Stack
+            local scrapStack = char and char.Head.ScrapStack
+            return scrapStack and #scrapStack:GetChildren() or 0
         end)
-        if ok and stack then
-            return #stack:GetChildren()
-        end
+        if ok then return count end
         return 0
     end
 
